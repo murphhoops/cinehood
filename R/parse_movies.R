@@ -24,103 +24,104 @@ us_certification <- function(m) {
   NA_character_
 }
 
-parse_film_row <- function(m) {
-  rd <- chr(m$release_date)
+# One value per film, typed: col(movies, function(m) m$runtime, int, integer(1)).
+col <- function(movies, get, conv, proto) {
+  vapply(movies, function(m) conv(get(m)), proto)
+}
+
+parse_films <- function(movies) {
+  rd <- col(movies, function(m) m$release_date, chr, character(1))
+  rd[!is.na(rd) & !nzchar(rd)] <- NA
   dplyr::tibble(
-    tmdb_id           = int(m$id),
-    imdb_id           = chr(m$imdb_id),
-    title             = chr(m$title),
-    original_title    = chr(m$original_title),
-    original_language = chr(m$original_language),
-    release_date      = if (is.na(rd) || !nzchar(rd)) as.Date(NA) else as.Date(rd),
-    status            = chr(m$status),
-    runtime           = int(m$runtime),
-    overview          = chr(m$overview),
-    tagline           = chr(m$tagline),
-    poster_path       = chr(m$poster_path),
-    popularity        = num(m$popularity),
-    vote_average      = num(m$vote_average),
-    vote_count        = int(m$vote_count),
-    budget            = num(m$budget),
-    revenue           = num(m$revenue),
-    collection_id     = int(m$belongs_to_collection$id),
-    collection_name   = chr(m$belongs_to_collection$name),
-    us_certification  = us_certification(m),
-    fetched_at        = as.Date(chr(m$.fetched_at))
+    tmdb_id           = col(movies, function(m) m$id, int, integer(1)),
+    imdb_id           = col(movies, function(m) m$imdb_id, chr, character(1)),
+    title             = col(movies, function(m) m$title, chr, character(1)),
+    original_title    = col(movies, function(m) m$original_title, chr, character(1)),
+    original_language = col(movies, function(m) m$original_language, chr, character(1)),
+    release_date      = as.Date(rd),
+    status            = col(movies, function(m) m$status, chr, character(1)),
+    runtime           = col(movies, function(m) m$runtime, int, integer(1)),
+    overview          = col(movies, function(m) m$overview, chr, character(1)),
+    tagline           = col(movies, function(m) m$tagline, chr, character(1)),
+    poster_path       = col(movies, function(m) m$poster_path, chr, character(1)),
+    popularity        = col(movies, function(m) m$popularity, num, numeric(1)),
+    vote_average      = col(movies, function(m) m$vote_average, num, numeric(1)),
+    vote_count        = col(movies, function(m) m$vote_count, int, integer(1)),
+    budget            = col(movies, function(m) m$budget, num, numeric(1)),
+    revenue           = col(movies, function(m) m$revenue, num, numeric(1)),
+    collection_id     = col(movies, function(m) m$belongs_to_collection$id, int, integer(1)),
+    collection_name   = col(movies, function(m) m$belongs_to_collection$name, chr, character(1)),
+    us_certification  = vapply(movies, us_certification, character(1)),
+    fetched_at        = as.Date(col(movies, function(m) m$.fetched_at, chr, character(1)))
   )
 }
 
-# A list of objects -> a tibble with the chosen fields, plus the film's id.
-pluck_rows <- function(m, items, fields) {
-  items <- items %||% list()
-  if (!length(items)) return(NULL)
-  cols <- lapply(fields, function(f) {
-    vals <- lapply(items, function(x) x[[f]])
-    if (all(vapply(vals, function(v) is.null(v) || is.numeric(v), logical(1)))) {
-      vapply(vals, num, numeric(1))
-    } else {
-      vapply(vals, chr, character(1))
-    }
-  })
-  names(cols) <- fields
-  dplyr::bind_cols(dplyr::tibble(tmdb_id = int(m$id)), dplyr::as_tibble(cols))
+# Every film's sub-list (its genres, keywords, ...) flattened into one table,
+# one row per item, with the film's id. `fields` maps each field to a
+# converter: list(id = int, name = chr). Builds each column in one pass instead
+# of a small table per film, which is what kept the first version slow.
+explode <- function(movies, get, fields) {
+  items <- lapply(movies, function(m) get(m) %||% list())
+  flat <- unlist(items, recursive = FALSE)
+  out <- list(tmdb_id = rep(col(movies, function(m) m$id, int, integer(1)), lengths(items)))
+  for (f in names(fields)) {
+    conv <- fields[[f]]
+    proto <- if (identical(conv, int)) integer(1) else if (identical(conv, num)) numeric(1) else character(1)
+    out[[f]] <- vapply(flat, function(x) conv(x[[f]]), proto)
+  }
+  dplyr::as_tibble(out)
 }
 
-parse_people <- function(m, cast_n) {
-  crew <- pluck_rows(m, m$credits$crew, c("id", "name", "department", "job"))
-  cast <- pluck_rows(m, m$credits$cast, c("id", "name", "character", "order"))
-
-  directors <- if (!is.null(crew)) {
-    crew |> dplyr::filter(job == "Director") |>
-      dplyr::transmute(tmdb_id, person_id = as.integer(id), name, role = "director",
-                       billing = NA_integer_, detail = job)
-  }
-  writers <- if (!is.null(crew)) {
-    crew |> dplyr::filter(department == "Writing") |>
-      dplyr::distinct(id, .keep_all = TRUE) |>
-      dplyr::transmute(tmdb_id, person_id = as.integer(id), name, role = "writer",
-                       billing = NA_integer_, detail = job)
-  }
-  actors <- if (!is.null(cast)) {
-    cast |> dplyr::arrange(order) |> dplyr::slice_head(n = cast_n) |>
-      dplyr::transmute(tmdb_id, person_id = as.integer(id), name, role = "cast",
-                       billing = as.integer(order) + 1L, detail = character)
-  }
-  dplyr::bind_rows(directors, writers, actors)
+# Only the crew rows phase 1 keeps (directors and writers), and only the top
+# billed cast: real films list 100+ crew and 40+ cast, most of which we drop.
+crew_kept <- function(m) {
+  Filter(function(c) identical(c$job, "Director") || identical(c$department, "Writing"),
+         m$credits$crew %||% list())
 }
 
-# Stack one sub-list per film; if no film had any, return the empty template so
-# every table keeps its columns and types.
-stack <- function(movies, f, shape, template) {
-  df <- dplyr::bind_rows(lapply(movies, f))
-  if (!nrow(df)) return(template)
-  shape(df)
+cast_top <- function(cast_n) {
+  function(m) {
+    cs <- m$credits$cast %||% list()
+    if (!length(cs)) return(cs)
+    ord <- vapply(cs, function(c) num(c$order), numeric(1))
+    cs[order(ord)][seq_len(min(cast_n, length(cs)))]
+  }
+}
+
+parse_people <- function(movies, cast_n) {
+  crew <- explode(movies, crew_kept, list(id = int, name = chr, department = chr, job = chr))
+  cast <- explode(movies, cast_top(cast_n), list(id = int, name = chr, character = chr, order = int))
+
+  directors <- crew |> dplyr::filter(job == "Director") |>
+    dplyr::transmute(tmdb_id, person_id = id, name, role = "director",
+                     billing = NA_integer_, detail = job)
+  writers <- crew |> dplyr::filter(department == "Writing") |>
+    dplyr::distinct(tmdb_id, id, .keep_all = TRUE) |>
+    dplyr::transmute(tmdb_id, person_id = id, name, role = "writer",
+                     billing = NA_integer_, detail = job)
+  actors <- cast |>
+    dplyr::transmute(tmdb_id, person_id = id, name, role = "cast",
+                     billing = order + 1L, detail = character)
+
+  film_order <- col(movies, function(m) m$id, int, integer(1))
+  dplyr::bind_rows(directors, writers, actors) |>
+    dplyr::arrange(match(tmdb_id, film_order),
+                   match(role, c("director", "writer", "cast")), billing)
 }
 
 parse_movies <- function(movies, cast_n = 5) {
   list(
-    films = dplyr::bind_rows(lapply(movies, parse_film_row)),
-    film_genres = stack(movies,
-      function(m) pluck_rows(m, m$genres, c("id", "name")),
-      function(d) dplyr::transmute(d, tmdb_id, genre_id = as.integer(id), genre = name),
-      dplyr::tibble(tmdb_id = integer(), genre_id = integer(), genre = character())),
-    film_people = stack(movies,
-      function(m) parse_people(m, cast_n),
-      identity,
-      dplyr::tibble(tmdb_id = integer(), person_id = integer(), name = character(),
-                    role = character(), billing = integer(), detail = character())),
-    film_keywords = stack(movies,
-      function(m) pluck_rows(m, m$keywords$keywords, c("id", "name")),
-      function(d) dplyr::transmute(d, tmdb_id, keyword_id = as.integer(id), keyword = name),
-      dplyr::tibble(tmdb_id = integer(), keyword_id = integer(), keyword = character())),
-    film_companies = stack(movies,
-      function(m) pluck_rows(m, m$production_companies, c("id", "name", "origin_country")),
-      function(d) dplyr::transmute(d, tmdb_id, company_id = as.integer(id), company = name, origin_country),
-      dplyr::tibble(tmdb_id = integer(), company_id = integer(), company = character(),
-                    origin_country = character())),
-    film_countries = stack(movies,
-      function(m) pluck_rows(m, m$production_countries, c("iso_3166_1", "name")),
-      function(d) dplyr::transmute(d, tmdb_id, country_code = iso_3166_1, country = name),
-      dplyr::tibble(tmdb_id = integer(), country_code = character(), country = character()))
+    films = parse_films(movies),
+    film_genres = explode(movies, function(m) m$genres, list(id = int, name = chr)) |>
+      dplyr::transmute(tmdb_id, genre_id = id, genre = name),
+    film_people = parse_people(movies, cast_n),
+    film_keywords = explode(movies, function(m) m$keywords$keywords, list(id = int, name = chr)) |>
+      dplyr::transmute(tmdb_id, keyword_id = id, keyword = name),
+    film_companies = explode(movies, function(m) m$production_companies,
+                             list(id = int, name = chr, origin_country = chr)) |>
+      dplyr::transmute(tmdb_id, company_id = id, company = name, origin_country),
+    film_countries = explode(movies, function(m) m$production_countries,
+                             list(iso_3166_1 = chr, name = chr)) |>
+      dplyr::transmute(tmdb_id, country_code = iso_3166_1, country = name)
   )
 }
