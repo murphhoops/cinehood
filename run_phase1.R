@@ -7,7 +7,7 @@ for (f in list.files("R", full.names = TRUE, pattern = "\\.R$")) source(f)
 cfg <- cinehood_config()
 
 message("1/5 ID export")
-export_file <- download_id_export(cfg$raw_dir, cfg$export_date)
+export_file <- download_id_export(cfg$raw_dir, cfg$export_date, cfg$export_max_age_days)
 candidates  <- select_candidates(read_id_export(export_file), cfg$candidate_top_n)
 
 message("2/5 fetching details (cached; first run is the slow one)")

@@ -92,3 +92,47 @@ test_that("tables round-trip and the report writes", {
   expect_true(any(grepl("Kept \\(released", txt)))
   expect_true(any(grepl("\\| 1980s \\| 1 \\|", txt)))
 })
+
+test_that("a recent export on disk is reused instead of downloading", {
+  dir <- withr::local_tempdir()
+  ex <- file.path(dir, "exports"); dir.create(ex)
+  file.copy(fixture("movie_ids_test.json.gz"), file.path(ex, "movie_ids_11_14_2026.json.gz"))
+  calls <- 0
+  never <- function(url, dest) { calls <<- calls + 1; FALSE }
+  p <- download_id_export(dir, today = as.Date("2026-11-17"), downloader = never)
+  expect_equal(basename(p), "movie_ids_11_14_2026.json.gz")
+  expect_equal(calls, 0)
+})
+
+test_that("a failed download falls back to the day before", {
+  dir <- withr::local_tempdir()
+  tried <- character()
+  second_works <- function(url, dest) {
+    tried <<- c(tried, basename(url))
+    if (length(tried) < 2) return(FALSE)
+    file.copy(fixture("movie_ids_test.json.gz"), dest)
+  }
+  p <- download_id_export(dir, today = as.Date("2026-11-17"), downloader = second_works)
+  expect_equal(tried, c("movie_ids_11_16_2026.json.gz", "movie_ids_11_15_2026.json.gz"))
+  expect_equal(basename(p), "movie_ids_11_15_2026.json.gz")
+})
+
+test_that("an old export is only a last resort, and an outright failure stops clearly", {
+  dir <- withr::local_tempdir()
+  ex <- file.path(dir, "exports"); dir.create(ex)
+  file.copy(fixture("movie_ids_test.json.gz"), file.path(ex, "movie_ids_10_01_2026.json.gz"))
+  never <- function(url, dest) FALSE
+  p <- download_id_export(dir, today = as.Date("2026-11-17"), downloader = never)
+  expect_equal(basename(p), "movie_ids_10_01_2026.json.gz")
+  expect_error(download_id_export(withr::local_tempdir(), today = as.Date("2026-11-17"), downloader = never),
+               "any of the last 3 days")
+})
+
+test_that("a dropped download leaves no partial file behind", {
+  dir <- withr::local_tempdir()
+  dest <- file.path(dir, "movie_ids_11_16_2026.json.gz")
+  ok <- try_download("https://127.0.0.1:9/nothing.gz", dest, tries = 1, wait_secs = 0)
+  expect_false(ok)
+  expect_false(file.exists(dest))
+  expect_false(file.exists(paste0(dest, ".part")))
+})

@@ -7,6 +7,10 @@ cinehood_config <- function() {
     # day's file around 08:00 UTC, so "yesterday" is the safe default.
     export_date = NULL,
 
+    # With export_date NULL, reuse an ID export already on disk if it's at
+    # most this many days old instead of downloading a new one.
+    export_max_age_days = 7,
+
     # How many of the most popular movie IDs to fetch details for. TMDB counts
     # votes more sparsely than IMDb, so this is deliberately generous.
     candidate_top_n = 40000,
