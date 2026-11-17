@@ -1,0 +1,15 @@
+# Data: rebuilt by the pipeline, and TMDB data can't be redistributed
+data/
+
+# targets store
+_targets/
+
+# Secrets
+.Renviron
+.env
+
+# R / RStudio
+.Rhistory
+.RData
+.Rproj.user/
+*.Rproj

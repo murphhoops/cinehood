@@ -1,0 +1,7 @@
+{"id":902,"imdb_id":null,"title":"Test Film Two","original_title":"Testfilm Zwei","original_language":"de","release_date":"1987-03-01","status":"Released","runtime":95,"overview":"","tagline":null,"poster_path":null,"popularity":5.1,"vote_average":6.1,"vote_count":400,"budget":0,"revenue":0,"belongs_to_collection":{"id":555,"name":"Test Collection"},
+"genres":[{"id":27,"name":"Horror"}],
+"production_companies":[],
+"production_countries":[{"iso_3166_1":"DE","name":"Germany"}],
+"credits":{"cast":[{"id":31,"name":"Actor G","character":"Someone","order":0}],"crew":[{"id":41,"name":"Director W","department":"Directing","job":"Director"},{"id":42,"name":"Co-Director V","department":"Directing","job":"Director"}]},
+"keywords":{"keywords":[{"id":101,"name":"family"},{"id":104,"name":"cult"}]},
+"release_dates":{"results":[]}}
