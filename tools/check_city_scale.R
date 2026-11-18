@@ -1,5 +1,6 @@
 # Checks the city method at full size: a made-up catalog of 14,000 films in 200
-# planted groups, with random genres and languages, random mood tags on 30% of
+# planted groups, with random soft genres and languages, group-level horror,
+# animation and documentary, random mood tags on 30% of
 # films (which should be ignored), and 1,000 extra keyword-poor films (which
 # should be placed with their own group as a loose fit). Good settings recover
 # the groups: purity and "kept together" near 1.00. From the project folder:
@@ -24,7 +25,13 @@ kw <- dplyr::bind_rows(lapply(seq_len(n), function(i) {
 kw$keyword_id <- match(kw$keyword, unique(kw$keyword))
 moods <- dplyr::tibble(tmdb_id = sample(n, round(0.3 * n)), keyword = "admiring", keyword_id = 325761L)
 kw <- dplyr::bind_rows(kw, moods)
-genres <- dplyr::tibble(tmdb_id = seq_len(n), genre = sample(c("Drama","Comedy","Thriller","Action","Horror","Romance","Crime"), n, TRUE))
+# Soft genres are random (the hardest case for keywords to win). Hard-line
+# genres (horror, animation, documentary) belong to whole groups, as they do
+# in real films: 15% of groups are horror, 7% animated, 2% documentary.
+hard <- sample(c(rep("Horror", 30), rep("Animation", 14), rep("Documentary", 4), rep(NA, 152)))
+genres <- dplyr::bind_rows(
+  dplyr::tibble(tmdb_id = seq_len(n), genre = sample(c("Drama","Comedy","Thriller","Action","Romance","Crime"), n, TRUE)),
+  dplyr::tibble(tmdb_id = seq_len(n), genre = hard[grp]) |> dplyr::filter(!is.na(genre)))
 spine <- list(films = films, film_keywords = kw, film_genres = genres)
 cfg <- cinehood_config()
 args <- commandArgs(TRUE)

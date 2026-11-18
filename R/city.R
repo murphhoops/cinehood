@@ -184,6 +184,35 @@ split_hard_genres <- function(label, tmdb_id, film_genres, cfg) {
   list(label = label, splits = splits)
 }
 
+# After splitting, a neighborhood can still hold a few films from the other
+# side of a hard line: three documentaries among ocean adventures, a horror
+# film among grief dramas. Each such film moves to the nearest neighborhood
+# whose majority is on its side of every hard line. If there's no such
+# neighborhood, it stays put.
+enforce_hard_lines <- function(label, tmdb_id, film_genres, points, cfg) {
+  genres <- cfg$city_split_genres
+  if (!length(genres)) return(list(label = label, moved = rep(FALSE, length(label))))
+  side <- vapply(genres, function(g) tmdb_id %in% film_genres$tmdb_id[film_genres$genre == g],
+                 logical(length(tmdb_id)))
+  side <- matrix(side, nrow = length(tmdb_id))
+  ids <- sort(unique(label))
+  hood_side <- t(vapply(ids, function(L) colMeans(side[label == L, , drop = FALSE]) >= 0.5,
+                        logical(length(genres))))
+  hood_side <- matrix(hood_side, nrow = length(ids))
+  cents <- centroids_of(points, label)
+  own <- match(label, ids)
+  off_side <- rowSums(side != hood_side[own, , drop = FALSE]) > 0
+  moved <- rep(FALSE, length(label))
+  for (i in which(off_side)) {
+    ok <- rowSums(hood_side != matrix(side[i, ], nrow(hood_side), ncol(hood_side), byrow = TRUE)) == 0
+    if (!any(ok)) next
+    d <- colSums((t(cents[ok, , drop = FALSE]) - points[i, ])^2)
+    label[i] <- ids[ok][which.min(d)]
+    moved[i] <- TRUE
+  }
+  list(label = label, moved = moved)
+}
+
 # How firmly each film sits in its neighborhood: its distance to the second
 # nearest neighborhood center against its distance to its own. 0.5 = halfway
 # between two neighborhoods; near 1 = right at the heart of its own.
@@ -224,6 +253,8 @@ build_city <- function(spine, cfg) {
   # documentary). Placement is decided before this, so it's unaffected.
   split <- split_hard_genres(label, feat$tmdb_id, spine$film_genres, cfg)
   label <- split$label
+  crossed <- enforce_hard_lines(label, feat$tmdb_id, spine$film_genres, emb$cluster_space, cfg)
+  label <- crossed$label
 
   # Number neighborhoods by size, largest first.
   sizes <- sort(table(label), decreasing = TRUE)
@@ -234,6 +265,7 @@ build_city <- function(spine, cfg) {
   placement <- rep("core", length(label))
   placement[rich][hood$from_noise] <- "nearest"
   placement[!rich] <- "loose fit"
+  placement[crossed$moved] <- "moved across genre line"
   membership <- rep(NA_real_, length(label))
   membership[rich] <- hood$membership
 
@@ -260,5 +292,6 @@ build_city <- function(spine, cfg) {
                            films_without_keywords = sum(feat$n_keywords == 0),
                            films_loose = sum(!rich),
                            genre_splits = split$splits,
+                           genre_moves = sum(crossed$moved),
                            n_features = ncol(feat$X_kw) + ncol(feat$side)))
 }

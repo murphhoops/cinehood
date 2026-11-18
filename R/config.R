@@ -66,7 +66,9 @@ cinehood_config <- function() {
     # (14,000 made-up films, 200 planted groups, random genres): at genre 0.35
     # the groups come back whole (98% kept together); at 0.42 that drops to
     # 94% and at 0.5 to 64%. Hard genre lines are handled by the split rule
-    # below instead of a heavier genre weight.
+    # below instead of a heavier genre weight. With horror / animation /
+    # documentary assigned to whole groups and the hard-line rule on, the
+    # check gives purity 1.00 and 95% kept together.
     city_w_keywords = 1.00,
     city_w_genres   = 0.35,
     city_w_year     = 0.25,

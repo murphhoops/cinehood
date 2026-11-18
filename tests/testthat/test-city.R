@@ -243,3 +243,28 @@ test_that("the report lists neighborhoods worth a second look", {
   expect_true(any(grepl("^## Worth a second look", rep)))
   expect_true(any(grepl("split on a hard genre line", rep)))
 })
+
+test_that("plot events like murder and grief count as generic", {
+  expect_equal(classify_keyword(c("murder", "loss of loved one", "death of father", "kidnapping", "kaiju"),
+                                c(9826L, 697L, 10201L, 1930L, 161791L)),
+               c("light", "light", "light", "light", "content"))
+})
+
+test_that("a few films across a hard line move to the nearest neighborhood on their side", {
+  cfg <- city_test_cfg(withr::local_tempdir())
+  ids <- 1:100
+  # neighborhood 1: 57 ocean adventures + 3 documentaries; 2: 20 documentaries; 3: 20 more adventures far away
+  label <- c(rep(1L, 60), rep(2L, 20), rep(3L, 20))
+  genres <- dplyr::tibble(tmdb_id = ids,
+                          genre = c(rep("Adventure", 57), rep("Documentary", 3), rep("Documentary", 20), rep("Adventure", 20)))
+  points <- rbind(matrix(0, 60, 2), matrix(1, 20, 2), matrix(5, 20, 2))
+  out <- enforce_hard_lines(label, ids, genres, points, cfg)
+  expect_equal(out$label[58:60], c(2L, 2L, 2L))      # the documentaries moved
+  expect_equal(sum(out$moved), 3)
+  expect_true(all(out$label[1:57] == 1L))            # the adventures stayed
+  # with no documentary neighborhood to go to, they stay put
+  label2 <- c(rep(1L, 60), rep(3L, 20))
+  genres2 <- genres[c(1:60, 81:100), ]
+  out2 <- enforce_hard_lines(label2, genres2$tmdb_id, genres2, points[c(1:60, 81:100), ], cfg)
+  expect_equal(sum(out2$moved), 0)
+})
