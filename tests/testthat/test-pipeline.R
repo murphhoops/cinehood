@@ -252,3 +252,69 @@ test_that("a partial search older than the reuse window starts over", {
   expect_false("stale" %in% out$original_title)
   expect_equal(nrow(out), 3)
 })
+
+test_that("each release year gets its era's vote floor", {
+  eras <- list(list(before = 1970, floor = 75), list(before = 1990, floor = 150))
+  expect_equal(floor_for_year(c(1925L, 1969L, 1970L, 1989L, 1990L, 2024L, NA), eras, 300),
+               c(75, 75, 150, 150, 300, 300, 300))
+  expect_equal(floor_for_year(2000L, list(), 300), 300)
+})
+
+test_that("older films are kept on fewer votes, recent ones still need the full floor", {
+  cfg <- cinehood_config()
+  movies <- load_fixture_movies(c(901, 901, 901))
+  movies[[1]]$id <- 951L; movies[[1]]$release_date <- "1955-06-01"; movies[[1]]$vote_count <- 90L
+  movies[[2]]$id <- 952L; movies[[2]]$release_date <- "1978-06-01"; movies[[2]]$vote_count <- 120L
+  movies[[3]]$id <- 953L; movies[[3]]$release_date <- "2015-06-01"; movies[[3]]$vote_count <- 200L
+  kept <- derive_spine(parse_movies(movies, cfg$cast_n), cfg)$films
+  expect_equal(kept$tmdb_id, 951L)                     # 1955 at 90 votes: in
+  # 1978 at 120 (under 150) and 2015 at 200 (under 300): out
+})
+
+test_that("a thinly voted old film is still pulled firmly toward the average", {
+  # At the real catalog's mean (6.62), a 9.5 on 80 votes ranks below an 8.0 on
+  # 20,000, because the weighted rating's anchor stays at 300 votes for every era.
+  c_mean <- 6.62
+  old_thin <- weighted_rating(9.5, 80, 300, c_mean)
+  big_hit  <- weighted_rating(8.0, 20000, 300, c_mean)
+  expect_lt(old_thin, big_hit)
+  expect_lt(old_thin, 7.5)
+})
+
+test_that("the search asks older years for fewer votes, and redoes a sweep made with other floors", {
+  dir <- withr::local_tempdir()
+  cfg <- test_cfg(dir)
+  cfg$discover_first_year <- 1968
+  floors <- list()
+  f <- fake_discover(list("1968" = 1, "1975" = 1, "2000" = 1))
+  out <- suppressMessages(discover_by_vote_count(cfg, token = "x", today = as.Date("2026-11-17"),
+                                                 fetch = f$fetch))
+  # the request builder is given each year's floor
+  expect_equal(floor_for_year(c(1968L, 1975L, 2000L), cfg$discover_vote_floor_by_era, cfg$discover_vote_floor),
+               c(50, 100, 200))
+  # same settings -> reused
+  calls <- f$calls()
+  suppressMessages(discover_by_vote_count(cfg, token = "x", today = as.Date("2026-11-18"), fetch = f$fetch))
+  expect_equal(f$calls(), calls)
+  # different floors -> searched again
+  cfg$discover_vote_floor_by_era <- list(list(before = 1970, floor = 30))
+  suppressMessages(discover_by_vote_count(cfg, token = "x", today = as.Date("2026-11-18"), fetch = f$fetch))
+  expect_gt(f$calls(), calls)
+})
+
+test_that("an old-format saved search is not reused", {
+  dir <- withr::local_tempdir()
+  cfg <- test_cfg(dir)
+  cfg$discover_first_year <- 2026
+  d <- file.path(cfg$raw_dir, "discover"); dir.create(d, recursive = TRUE)
+  saveRDS(dplyr::tibble(tmdb_id = 1L, original_title = "old", discover_votes = 1L, discover_popularity = 1),
+          file.path(d, "discover_2026-11-17.rds"))
+  f <- fake_discover(list("2026" = 2))
+  out <- suppressMessages(discover_by_vote_count(cfg, token = "x", today = as.Date("2026-11-17"), fetch = f$fetch))
+  expect_false("old" %in% out$original_title)
+  expect_equal(nrow(out), 2)
+})
+
+test_that("the report names the era floors", {
+  expect_equal(floor_label(cinehood_config()), "75+ before 1970, 150+ before 1990, 300+ after (votes)")
+})

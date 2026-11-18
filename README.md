@@ -52,10 +52,10 @@ And `data/checks/spine_report.md`: counts at each step, how complete each field 
 | Step | File | What it does |
 | --- | --- | --- |
 | 1a | `R/ingest_ids.R` | Downloads TMDB's daily export of every movie ID; keeps the 40,000 most popular non-adult, non-video entries |
-| 1b | `R/discover.R` | The second way in: searches TMDB year by year for every film with 200+ votes, so older films with little current activity aren't missed. Merged with 1a; each candidate is labeled by how it got in |
+| 1b | `R/discover.R` | The second way in: searches TMDB year by year for every film with enough votes (50+ before 1970, 100+ before 1990, 200+ after), so older films with little current activity aren't missed. Merged with 1a; each candidate is labeled by how it got in |
 | 2 | `R/fetch_movies.R` | Fetches each film's details, credits, keywords and release dates in one request; caches the JSON; retries rate limits and errors one at a time |
 | 3 | `R/parse_movies.R` | Turns the JSON into the tables above |
-| 4 | `R/derive.R` | Keeps released films of 40+ minutes and 300+ votes; adds decade, runtime bucket, log votes, and the public baseline |
+| 4 | `R/derive.R` | Keeps released films of 40+ minutes with enough votes for their era (75+ before 1970, 150+ before 1990, 300+ after); adds decade, runtime bucket, log votes, and the public baseline |
 | 5 | `R/checks.R` | Writes the report |
 
 All the knobs (how many candidates, the vote-count search floor and first year, the floors, cast size, request rate) are in `R/config.R`.
@@ -64,7 +64,7 @@ All the knobs (how many candidates, the vote-count search floor and first year, 
 
 TMDB ratings are noisy for films with few votes, so `public_wr` is a weighted rating that pulls thin films toward the catalog average:
 
-`public_wr = v/(v+m) × rating + m/(v+m) × catalog mean`, with `m` = the vote floor.
+`public_wr = v/(v+m) × rating + m/(v+m) × catalog mean`, with `m` = 300 for every film, so an older film kept on fewer votes is pulled harder toward the average.
 
 `public_z` is that, standardized across the kept catalog. It's the "tourists say" number the taste model compares you against.
 

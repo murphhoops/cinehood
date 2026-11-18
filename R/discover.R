@@ -55,20 +55,29 @@ discover_by_vote_count <- function(cfg, token = tmdb_token(),
   dir <- file.path(cfg$raw_dir, "discover")
   dir.create(dir, recursive = TRUE, showWarnings = FALSE)
 
+  # What a saved sweep was made with; one made with other floors isn't reused.
+  settings <- list(floor = cfg$discover_vote_floor, eras = cfg$discover_vote_floor_by_era,
+                   first_year = cfg$discover_first_year)
+
   # Reuse a recent finished sweep, like the ID export, so reruns don't repeat it.
   saved <- list.files(dir, pattern = "^discover_\\d{4}-\\d{2}-\\d{2}\\.rds$", full.names = TRUE)
   if (length(saved)) {
     dates <- as.Date(sub("^discover_(.*)\\.rds$", "\\1", basename(saved)))
     i <- which.max(dates)
-    if (as.numeric(today - dates[[i]]) <= cfg$export_max_age_days) {
+    kept <- readRDS(saved[[i]])
+    if (as.numeric(today - dates[[i]]) <= cfg$export_max_age_days &&
+        is.list(kept) && !is.data.frame(kept) && identical(kept$settings, settings)) {
       message("using the vote-count search already on disk: ", basename(saved[[i]]))
-      return(readRDS(saved[[i]]))
+      return(kept$films)
     }
   }
 
+  discover_floor <- function(year) {
+    floor_for_year(year, cfg$discover_vote_floor_by_era %||% list(), cfg$discover_vote_floor)
+  }
   if (is.null(fetch)) {
     fetch <- function(year, page) {
-      tmdb_discover_request(year, page, cfg$discover_vote_floor, token, cfg$language) |>
+      tmdb_discover_request(year, page, discover_floor(year), token, cfg$language) |>
         httr2::req_throttle(rate = cfg$rate_per_sec) |>
         perform_with_retry() |>
         httr2::resp_body_json()
@@ -79,15 +88,18 @@ discover_by_vote_count <- function(cfg, token = tmdb_token(),
   # only the year it hit. A partial sweep older than the reuse window starts over.
   partial <- file.path(dir, "partial")
   stamp <- file.path(partial, "started.txt")
+  settings_file <- file.path(partial, "settings.rds")
   if (file.exists(stamp)) {
     started <- as.Date(readLines(stamp, warn = FALSE)[1])
-    if (is.na(started) || as.numeric(today - started) > cfg$export_max_age_days) {
+    same <- file.exists(settings_file) && identical(readRDS(settings_file), settings)
+    if (is.na(started) || as.numeric(today - started) > cfg$export_max_age_days || !same) {
       unlink(partial, recursive = TRUE)
     }
   }
   if (!dir.exists(partial)) {
     dir.create(partial, recursive = TRUE)
     writeLines(as.character(today), stamp)
+    saveRDS(settings, settings_file)
   }
 
   years <- seq(cfg$discover_first_year, as.integer(format(today, "%Y")))
@@ -116,7 +128,7 @@ discover_by_vote_count <- function(cfg, token = tmdb_token(),
 
   out <- dplyr::bind_rows(lapply(year_file(years), readRDS)) |>
     dplyr::distinct(tmdb_id, .keep_all = TRUE)
-  saveRDS(out, file.path(dir, paste0("discover_", today, ".rds")))
+  saveRDS(list(settings = settings, films = out), file.path(dir, paste0("discover_", today, ".rds")))
   unlink(partial, recursive = TRUE)
   out
 }

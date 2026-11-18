@@ -2,6 +2,14 @@
 
 pct <- function(x) sprintf("%.1f%%", 100 * mean(x))
 
+# "75+ votes before 1970, 150+ before 1990, 300+ after", or "300+ votes".
+floor_label <- function(cfg) {
+  eras <- cfg$vote_floor_by_era %||% list()
+  if (!length(eras)) return(sprintf("%d+ votes", cfg$vote_floor))
+  parts <- vapply(eras, function(e) sprintf("%d+ before %d", e$floor, e$before), character(1))
+  paste0(paste(parts, collapse = ", "), ", ", cfg$vote_floor, "+ after (votes)")
+}
+
 spine_report <- function(spine, candidates, fetch_log, cfg) {
   f <- spine$films
   per_film <- function(tbl) {
@@ -33,7 +41,7 @@ spine_report <- function(spine, candidates, fetch_log, cfg) {
     },
     sprintf("| Fetched this run | %s |", if (is.na(fetched_ok)) "0 (all cached)" else format(fetched_ok, big.mark = ",")),
     sprintf("| Still failing after retry | %s |", failed),
-    sprintf("| Kept (released, %d+ min, %d+ votes) | %s |", cfg$min_runtime, cfg$vote_floor,
+    sprintf("| Kept (released, %d+ min, %s) | %s |", cfg$min_runtime, floor_label(cfg),
             format(nrow(f), big.mark = ",")),
     if ("source" %in% names(candidates)) {
       kept_src <- dplyr::count(dplyr::semi_join(candidates, f, by = "tmdb_id"), source)

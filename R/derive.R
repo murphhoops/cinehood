@@ -7,6 +7,14 @@
 # with m = the vote floor and C = the mean rating of the kept films.
 weighted_rating <- function(r, v, m, c) (v / (v + m)) * r + (m / (v + m)) * c
 
+# The vote floor that applies to each release year: the first era a year falls
+# before, else the default. Eras are checked in order, earliest first.
+floor_for_year <- function(year, eras, default) {
+  out <- rep(default, length(year))
+  for (e in rev(eras)) out[!is.na(year) & year < e$before] <- e$floor
+  out
+}
+
 runtime_bucket <- function(minutes) {
   cut(minutes,
       breaks = c(-Inf, 89, 104, 119, 134, 149, Inf),
@@ -15,17 +23,18 @@ runtime_bucket <- function(minutes) {
 
 derive_spine <- function(parsed, cfg) {
   films <- parsed$films |>
+    dplyr::mutate(year = as.integer(format(release_date, "%Y"))) |>
     dplyr::filter(
       status == "Released",
       !is.na(release_date),
       !is.na(runtime), runtime >= cfg$min_runtime,
-      !is.na(vote_count), vote_count >= cfg$vote_floor
+      !is.na(vote_count),
+      vote_count >= floor_for_year(year, cfg$vote_floor_by_era %||% list(), cfg$vote_floor)
     )
 
   c_mean <- mean(films$vote_average)
   films <- films |>
     dplyr::mutate(
-      year           = as.integer(format(release_date, "%Y")),
       decade         = paste0(year %/% 10 * 10, "s"),
       runtime_bucket = as.character(runtime_bucket(runtime)),
       log_votes      = log10(vote_count),
