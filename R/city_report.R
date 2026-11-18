@@ -23,6 +23,13 @@ distinctive_keywords <- function(film_groups, film_keywords, vocab, group_col, m
 
 top_n_text <- function(x, n, sep = " / ") paste(utils::head(x, n), collapse = sep)
 
+# Examples: well-known films at the neighborhood's heart. Core members that fit
+# firmly (fit >= 0.6) come first, most-voted first; others only fill in.
+example_rank <- function(placement, fit, vote_count) {
+  tier <- ifelse(placement == "core" & fit >= 0.6, 0L, ifelse(placement == "core", 1L, 2L))
+  order(tier, -vote_count)
+}
+
 describe_groups <- function(film_groups, group_col, spine, vocab, n_name_words, n_examples) {
   films <- dplyr::inner_join(film_groups, spine$films, by = "tmdb_id")
   kw <- distinctive_keywords(film_groups, spine$film_keywords, vocab, group_col) |>
@@ -46,7 +53,12 @@ describe_groups <- function(film_groups, group_col, spine, vocab, n_name_words, 
       median_year = as.integer(stats::median(year)),
       top_language = names(sort(table(original_language), decreasing = TRUE))[1],
       top_language_share = round(max(table(original_language)) / dplyr::n(), 2),
-      examples = top_n_text(sprintf("%s (%d)", title[order(-vote_count)], year[order(-vote_count)]), n_examples, "; "),
+      examples = {
+        o <- example_rank(placement, fit, vote_count)
+        top_n_text(sprintf("%s (%d)", title[o], year[o]), n_examples, "; ")
+      },
+      core_share = round(mean(placement == "core"), 2),
+      mean_fit = round(mean(fit), 3),
       .groups = "drop")
   basics |>
     dplyr::left_join(kw, by = group_col) |>
@@ -58,14 +70,14 @@ describe_groups <- function(film_groups, group_col, spine, vocab, n_name_words, 
 city_tables <- function(city, spine, cfg) {
   fn <- city$film_neighborhoods
   vocab <- keyword_vocab(spine$film_keywords, nrow(spine$films), cfg)
-  hoods <- describe_groups(dplyr::select(fn, tmdb_id, neighborhood_id), "neighborhood_id",
+  hoods <- describe_groups(dplyr::select(fn, tmdb_id, neighborhood_id, placement, fit), "neighborhood_id",
                            spine, vocab, n_name_words = 3, n_examples = 8) |>
     dplyr::left_join(dplyr::distinct(fn, neighborhood_id, district_id), by = "neighborhood_id") |>
     dplyr::left_join(fn |> dplyr::group_by(neighborhood_id) |>
                        dplyr::summarise(x = mean(x), y = mean(y), share_placed = round(mean(from_noise), 2)),
                      by = "neighborhood_id") |>
     dplyr::relocate(neighborhood_id, district_id, draft_name, size)
-  districts <- describe_groups(dplyr::select(fn, tmdb_id, district_id), "district_id",
+  districts <- describe_groups(dplyr::select(fn, tmdb_id, district_id, placement, fit), "district_id",
                                spine, vocab, n_name_words = 2, n_examples = 6) |>
     dplyr::left_join(dplyr::count(hoods, district_id, name = "n_neighborhoods"), by = "district_id") |>
     dplyr::left_join(fn |> dplyr::group_by(district_id) |> dplyr::summarise(x = mean(x), y = mean(y)),
@@ -119,8 +131,8 @@ city_report <- function(city, tabs, cfg) {
   block <- function(r) c(
     sprintf("### %d. %s", r$neighborhood_id, r$draft_name),
     "",
-    sprintf("%s films, %s, district %d, %s", format(r$size, big.mark = ","), r$years, r$district_id,
-            dplyr::coalesce(r$top_genres, "")),
+    sprintf("%s films, %s, district %d, %s. Core %.0f%%, avg fit %.2f", format(r$size, big.mark = ","),
+            r$years, r$district_id, dplyr::coalesce(r$top_genres, ""), 100 * r$core_share, r$mean_fit),
     "",
     sprintf("Keywords: %s", dplyr::coalesce(r$top_keywords, "(none distinctive)")),
     "",
@@ -150,6 +162,8 @@ city_report <- function(city, tabs, cfg) {
     sprintf("| Films with under %d content keywords, placed afterwards as a loose fit | %s (%s) |",
             cfg$city_min_keywords, format(sum(fn$placement == "loose fit"), big.mark = ","),
             pct(fn$placement == "loose fit")),
+    sprintf("| Neighborhoods split on a hard genre line (%s) | %d |",
+            paste(cfg$city_split_genres, collapse = ", "), city$feature_info$genre_splits %||% 0L),
     sprintf("| Keywords used as features (of which counted at %s weight) | %s (%s) |",
             cfg$city_light_weight, format(city$feature_info$n_keywords, big.mark = ","),
             format(city$feature_info$n_light_keywords, big.mark = ",")),
@@ -169,6 +183,19 @@ city_report <- function(city, tabs, cfg) {
       b <- utils::head(h[order(-h$size), ], 10)
       sprintf("| %d | %s | %d | %s | %s |", b$neighborhood_id, b$draft_name, b$size, b$years,
               vapply(strsplit(b$examples, "; "), function(e) paste(utils::head(e, 3), collapse = "; "), character(1)))
+    },
+    "",
+    "## Worth a second look",
+    "",
+    "The 10 neighborhoods whose films sit least firmly in them (lowest average fit). If any feel like a grab bag, these are the likeliest.",
+    "",
+    "| # | Draft name | Films | Avg fit | Core share | Examples |",
+    "| --- | --- | --- | --- | --- | --- |",
+    {
+      w <- utils::head(h[order(h$mean_fit), ], 10)
+      sprintf("| %d | %s | %d | %.2f | %.0f%% | %s |", w$neighborhood_id, w$draft_name, w$size, w$mean_fit,
+              100 * w$core_share,
+              vapply(strsplit(w$examples, "; "), function(e) paste(utils::head(e, 4), collapse = "; "), character(1)))
     },
     "",
     sprintf("## %d random neighborhoods, for a check by eye", nrow(review)),

@@ -4,6 +4,7 @@
 # should be placed with their own group as a loose fit). Good settings recover
 # the groups: purity and "kept together" near 1.00. From the project folder:
 #   Rscript tools/check_city_scale.R            (about 3 minutes)
+#   Rscript tools/check_city_scale.R 0.5 off    (genre weight 0.5, no genre-line splits)
 
 suppressWarnings(for (f in list.files("R", full.names = TRUE)) source(f))
 set.seed(1)
@@ -26,6 +27,9 @@ kw <- dplyr::bind_rows(kw, moods)
 genres <- dplyr::tibble(tmdb_id = seq_len(n), genre = sample(c("Drama","Comedy","Thriller","Action","Horror","Romance","Crime"), n, TRUE))
 spine <- list(films = films, film_keywords = kw, film_genres = genres)
 cfg <- cinehood_config()
+args <- commandArgs(TRUE)
+if (length(args) >= 1) cfg$city_w_genres <- as.numeric(args[1])
+if (length(args) >= 2 && args[2] == "off") cfg$city_split_genres <- character()
 t1 <- system.time(city <- build_city(spine, cfg))[["elapsed"]]
 fn <- dplyr::inner_join(city$film_neighborhoods, dplyr::tibble(tmdb_id = seq_len(n), grp = grp), by = "tmdb_id")
 rich <- fn[fn$tmdb_id <= n_rich, ]
@@ -37,6 +41,6 @@ home <- rich |> dplyr::count(grp, neighborhood_id) |> dplyr::group_by(grp) |> dp
 thin <- fn[fn$tmdb_id > n_rich & own_n[fn$tmdb_id] >= 1, ] |>
   dplyr::left_join(dplyr::select(home, grp, home_id = neighborhood_id), by = "grp")
 thin_ok <- mean(thin$neighborhood_id == thin$home_id)
-cat(sprintf("%.0fs | neighborhoods %d (planted 200) | purity %.2f | kept together %.2f | unclaimed %.1f%% | keyword-poor films placed with their group %.2f (of those with 1+ own keyword)\n",
-  t1, dplyr::n_distinct(fn$neighborhood_id), purity, together,
+cat(sprintf("genre %.2f, splits %s | %.0fs | neighborhoods %d (planted 200) | purity %.2f | kept together %.2f | unclaimed %.1f%% | keyword-poor films placed with their group %.2f (of those with 1+ own keyword)\n",
+  cfg$city_w_genres, if (length(cfg$city_split_genres)) "on" else "off", t1, dplyr::n_distinct(fn$neighborhood_id), purity, together,
   100 * mean(rich$placement == "nearest"), thin_ok))

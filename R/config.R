@@ -62,9 +62,11 @@ cinehood_config <- function() {
     city_min_keywords = 3,
     # How much each kind of feature counts. Directors are deliberately absent:
     # neighborhoods are about what films are like, not who made them.
-    # Keywords lead; the others nudge. On a made-up 14,000-film catalog with
-    # 200 planted groups, these weights recovered the groups almost exactly;
-    # genre at 0.6 split them by genre instead.
+    # Keywords lead; the others nudge. Checked with tools/check_city_scale.R
+    # (14,000 made-up films, 200 planted groups, random genres): at genre 0.35
+    # the groups come back whole (98% kept together); at 0.42 that drops to
+    # 94% and at 0.5 to 64%. Hard genre lines are handled by the split rule
+    # below instead of a heavier genre weight.
     city_w_keywords = 1.00,
     city_w_genres   = 0.35,
     city_w_year     = 0.25,
@@ -76,6 +78,10 @@ cinehood_config <- function() {
     city_neighbors = 30,   # UMAP: how local the structure it keeps is
     city_min_pts   = 15,   # HDBSCAN: smallest group that counts as a neighborhood
     city_districts = 20,   # neighborhoods grouped into this many districts
+    # Genre lines viewers notice more than any keyword overlap. A neighborhood
+    # with at least this share on both sides of one is split in two.
+    city_split_genres    = c("Horror", "Animation", "Documentary"),
+    city_split_min_share = 0.25,
     city_seed      = 2026,
     city_review_n  = 20,   # random neighborhoods printed in the report for a check by eye
 

@@ -159,6 +159,45 @@ city_districts <- function(points, neighborhood, cfg) {
   unname(renum[as.character(district_of_hood)])
 }
 
+# ---- Hard genre lines ------------------------------------------------------
+
+# Some genre differences matter more to viewers than any keyword overlap:
+# horror vs. not, animated vs. live action, documentary vs. fiction. A
+# neighborhood that is a real mix across one of those lines (at least
+# `min_share` on each side, and enough films on each side to stand alone) is
+# split in two along it. Returns the new labels and how many splits happened.
+split_hard_genres <- function(label, tmdb_id, film_genres, cfg) {
+  splits <- 0L
+  for (g in cfg$city_split_genres) {
+    has_g <- tmdb_id %in% film_genres$tmdb_id[film_genres$genre == g]
+    for (L in sort(unique(label))) {
+      in_L <- label == L
+      n_g <- sum(has_g & in_L); n_other <- sum(!has_g & in_L)
+      share <- n_g / sum(in_L)
+      if (share >= cfg$city_split_min_share && share <= 1 - cfg$city_split_min_share &&
+          n_g >= cfg$city_min_pts && n_other >= cfg$city_min_pts) {
+        label[has_g & in_L] <- max(label) + 1L
+        splits <- splits + 1L
+      }
+    }
+  }
+  list(label = label, splits = splits)
+}
+
+# How firmly each film sits in its neighborhood: its distance to the second
+# nearest neighborhood center against its distance to its own. 0.5 = halfway
+# between two neighborhoods; near 1 = right at the heart of its own.
+fit_scores <- function(points, label) {
+  ids <- sort(unique(label))
+  cents <- centroids_of(points, label)
+  d2 <- pmax(outer(rowSums(points^2), rowSums(cents^2), "+") - 2 * points %*% t(cents), 0)
+  d <- sqrt(d2)
+  own <- d[cbind(seq_along(label), match(label, ids))]
+  d[cbind(seq_along(label), match(label, ids))] <- Inf
+  second <- if (ncol(d) > 1) apply(d, 1, min) else rep(Inf, length(label))
+  ifelse(is.finite(second), second / (own + second), 1)
+}
+
 # ---- Everything, as tables -------------------------------------------------
 
 build_city <- function(spine, cfg) {
@@ -181,6 +220,11 @@ build_city <- function(spine, cfg) {
     label[!rich] <- ids[nearest_center(emb$cluster_space[!rich, , drop = FALSE], cents)]
   }
 
+  # Split neighborhoods that straddle a hard genre line (horror, animation,
+  # documentary). Placement is decided before this, so it's unaffected.
+  split <- split_hard_genres(label, feat$tmdb_id, spine$film_genres, cfg)
+  label <- split$label
+
   # Number neighborhoods by size, largest first.
   sizes <- sort(table(label), decreasing = TRUE)
   new_id <- stats::setNames(seq_along(sizes), names(sizes))
@@ -200,6 +244,7 @@ build_city <- function(spine, cfg) {
     placement = placement,
     from_noise = placement != "core",
     membership = membership,
+    fit = round(fit_scores(emb$cluster_space, neighborhood), 3),
     n_keywords = feat$n_content_keywords,
     x = emb$map[, 1],
     y = emb$map[, 2]
@@ -214,5 +259,6 @@ build_city <- function(spine, cfg) {
                            n_light_keywords = sum(feat$vocab$kind == "light"),
                            films_without_keywords = sum(feat$n_keywords == 0),
                            films_loose = sum(!rich),
+                           genre_splits = split$splits,
                            n_features = ncol(feat$X_kw) + ncol(feat$side)))
 }

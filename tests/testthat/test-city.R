@@ -189,3 +189,57 @@ test_that("films with too few keywords are placed afterwards, near their own kin
   expect_gt(mean(thin$neighborhood_id == heist_home), 0.8)
   expect_false(anyNA(thin$x))
 })
+
+test_that("a neighborhood straddling a hard genre line is split in two", {
+  cfg <- city_test_cfg(withr::local_tempdir())
+  ids <- 1:60
+  label <- rep(1L, 60)
+  genres <- dplyr::tibble(tmdb_id = ids, genre = c(rep("Horror", 25), rep("Drama", 35)))
+  out <- split_hard_genres(label, ids, genres, cfg)
+  expect_equal(out$splits, 1L)
+  expect_equal(length(unique(out$label[1:25])), 1)
+  expect_false(out$label[1] == out$label[60])
+  # a few horror films in a drama neighborhood: not a real mix, left alone
+  genres2 <- dplyr::tibble(tmdb_id = ids, genre = c(rep("Horror", 8), rep("Drama", 52)))
+  expect_equal(split_hard_genres(label, ids, genres2, cfg)$splits, 0L)
+})
+
+test_that("death-themed horror and grief dramas end up in different neighborhoods", {
+  set.seed(3)
+  n <- 80
+  films <- dplyr::tibble(tmdb_id = 1:n, title = paste("Film", 1:n), year = 2005L,
+                         original_language = "en", runtime = 105L, vote_count = 1000L)
+  pool <- paste0("death_kw", 1:40)
+  kw <- dplyr::bind_rows(lapply(1:n, function(i) dplyr::tibble(tmdb_id = i, keyword = sample(pool, 5))))
+  # 40 other films to give the city more than one place to be
+  other <- dplyr::tibble(tmdb_id = 81:120, title = paste("Other", 1:40), year = 1990L,
+                         original_language = "en", runtime = 100L, vote_count = 500L)
+  kw <- dplyr::bind_rows(kw, dplyr::bind_rows(lapply(81:120, function(i)
+    dplyr::tibble(tmdb_id = i, keyword = sample(paste0("west_kw", 1:40), 5)))))
+  kw$keyword_id <- match(kw$keyword, unique(kw$keyword))
+  genres <- dplyr::tibble(tmdb_id = 1:120, genre = c(rep("Horror", 40), rep("Drama", 40), rep("Western", 40)))
+  spine <- list(films = dplyr::bind_rows(films, other), film_keywords = kw, film_genres = genres)
+  cfg <- city_test_cfg(withr::local_tempdir())
+  cfg$city_districts <- 2
+  fn <- build_city(spine, cfg)$film_neighborhoods
+  horror_hoods <- unique(fn$neighborhood_id[fn$tmdb_id <= 40])
+  drama_hoods <- unique(fn$neighborhood_id[fn$tmdb_id > 40 & fn$tmdb_id <= 80])
+  expect_length(intersect(horror_hoods, drama_hoods), 0)
+})
+
+test_that("every film gets a fit score, and examples come from the heart of a neighborhood", {
+  f <- city_fixture()
+  fn <- f$city$film_neighborhoods
+  expect_true(all(fn$fit > 0 & fn$fit <= 1))
+  # core films that fit firmly beat a famous edge film for the examples
+  o <- example_rank(c("nearest", "core", "core", "loose fit"), c(0.9, 0.7, 0.55, 0.9), c(100000, 50, 9000, 80000))
+  expect_equal(o, c(2, 3, 1, 4))
+  expect_true(all(c("core_share", "mean_fit") %in% names(f$tabs$neighborhoods)))
+})
+
+test_that("the report lists neighborhoods worth a second look", {
+  f <- city_fixture()
+  rep <- readLines(city_report(f$city, f$tabs, f$cfg))
+  expect_true(any(grepl("^## Worth a second look", rep)))
+  expect_true(any(grepl("split on a hard genre line", rep)))
+})
