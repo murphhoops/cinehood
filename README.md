@@ -51,13 +51,14 @@ And `data/checks/spine_report.md`: counts at each step, how complete each field 
 
 | Step | File | What it does |
 | --- | --- | --- |
-| 1 | `R/ingest_ids.R` | Downloads TMDB's daily export of every movie ID; keeps the 40,000 most popular non-adult, non-video entries |
+| 1a | `R/ingest_ids.R` | Downloads TMDB's daily export of every movie ID; keeps the 40,000 most popular non-adult, non-video entries |
+| 1b | `R/discover.R` | The second way in: searches TMDB year by year for every film with 200+ votes, so older films with little current activity aren't missed. Merged with 1a; each candidate is labeled by how it got in |
 | 2 | `R/fetch_movies.R` | Fetches each film's details, credits, keywords and release dates in one request; caches the JSON; retries rate limits and errors one at a time |
 | 3 | `R/parse_movies.R` | Turns the JSON into the tables above |
 | 4 | `R/derive.R` | Keeps released films of 40+ minutes and 300+ votes; adds decade, runtime bucket, log votes, and the public baseline |
 | 5 | `R/checks.R` | Writes the report |
 
-All the knobs (how many candidates, the floors, cast size, request rate) are in `R/config.R`.
+All the knobs (how many candidates, the vote-count search floor and first year, the floors, cast size, request rate) are in `R/config.R`.
 
 ### The public baseline
 

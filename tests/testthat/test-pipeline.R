@@ -136,3 +136,73 @@ test_that("a dropped download leaves no partial file behind", {
   expect_false(file.exists(dest))
   expect_false(file.exists(paste0(dest, ".part")))
 })
+
+# A stand-in for TMDB's discover search: `per_year` films a year, 20 a page.
+fake_discover <- function(per_year) {
+  calls <- 0
+  fetch <- function(year, page) {
+    calls <<- calls + 1
+    n <- per_year[[as.character(year)]] %||% 0
+    ids <- if (n) seq_len(n) + year * 1000 else integer()
+    on_page <- ids[((page - 1) * 20 + 1):min(page * 20, max(n, 1))]
+    on_page <- on_page[!is.na(on_page)]
+    list(total_pages = max(1, ceiling(n / 20)),
+         results = lapply(on_page, function(i) list(id = i, original_title = paste("Film", i),
+                                                     vote_count = 500, popularity = 1.5)))
+  }
+  list(fetch = fetch, calls = function() calls)
+}
+
+test_that("the vote-count search walks every page of a year", {
+  f <- fake_discover(list("1960" = 45))
+  films <- discover_year(1960, f$fetch)
+  expect_equal(nrow(films), 45)
+  expect_equal(f$calls(), 3)               # pages of 20, 20 and 5
+  expect_false(anyDuplicated(films$tmdb_id) > 0)
+})
+
+test_that("the search covers every year, saves itself, and is reused next time", {
+  dir <- withr::local_tempdir()
+  cfg <- test_cfg(dir)
+  cfg$discover_first_year <- 2024
+  f <- fake_discover(list("2024" = 3, "2025" = 25, "2026" = 0))
+  out <- discover_by_vote_count(cfg, token = "x", today = as.Date("2026-11-17"), fetch = f$fetch)
+  expect_equal(nrow(out), 28)
+  expect_true(file.exists(file.path(cfg$raw_dir, "discover", "discover_2026-11-17.rds")))
+  before <- f$calls()
+  again <- discover_by_vote_count(cfg, token = "x", today = as.Date("2026-11-20"), fetch = f$fetch)
+  expect_equal(f$calls(), before)          # reused, no new requests
+  expect_equal(again, out)
+})
+
+test_that("the search request asks for the right films", {
+  req <- tmdb_discover_request(1960, 2, 200, token = "x")
+  q <- httr2::url_parse(req$url)$query
+  expect_equal(q$primary_release_year, "1960")
+  expect_equal(q$`vote_count.gte`, "200")
+  expect_equal(q$sort_by, "vote_count.desc")
+  expect_equal(q$include_adult, "false")
+  expect_equal(q$page, "2")
+})
+
+test_that("both ways in combine into one list, labeled by source", {
+  popular <- dplyr::tibble(tmdb_id = c(1L, 2L), original_title = c("A", "B"),
+                           export_popularity = c(50, 40), adult = FALSE, video = FALSE)
+  discovered <- dplyr::tibble(tmdb_id = c(2L, 3L), original_title = c("B", "C"),
+                              discover_votes = c(900L, 400L), discover_popularity = c(1, 2))
+  cand <- combine_candidates(popular, discovered)
+  expect_equal(cand$tmdb_id, c(1L, 2L, 3L))
+  expect_equal(cand$source, c("popular", "both", "vote count"))
+  expect_equal(cand$original_title, c("A", "B", "C"))
+})
+
+test_that("the report breaks candidates and kept films down by source", {
+  dir <- withr::local_tempdir()
+  cfg <- test_cfg(dir)
+  spine <- derive_spine(parse_movies(load_fixture_movies(), cfg$cast_n), cfg)
+  cand <- dplyr::tibble(tmdb_id = c(901L, 902L, 903L), original_title = "x", export_popularity = 1,
+                        discover_votes = 1L, source = c("both", "vote count", "popular"))
+  txt <- readLines(spine_report(spine, cand, dplyr::tibble(tmdb_id = integer(), status = character()), cfg))
+  expect_true(any(grepl("found by vote count \\| 1 \\|", txt)))
+  expect_true(any(grepl("kept that came in by both \\| 1 \\|", txt)))
+})

@@ -15,6 +15,12 @@ cinehood_config <- function() {
     # votes more sparsely than IMDb, so this is deliberately generous.
     candidate_top_n = 40000,
 
+    # The second way in: every film with at least this many votes, searched
+    # year by year from this year on. Set a little below vote_floor so films
+    # near the line get fetched and checked against their real counts.
+    discover_vote_floor = 200,
+    discover_first_year = 1900,
+
     # Floors applied after fetching (the raw fetch keeps everything).
     vote_floor  = 300,   # TMDB vote_count
     min_runtime = 40,    # minutes; drops shorts

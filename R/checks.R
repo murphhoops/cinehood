@@ -26,11 +26,19 @@ spine_report <- function(spine, candidates, fetch_log, cfg) {
     "",
     "| Step | Films |",
     "| --- | --- |",
-    sprintf("| Candidates from the ID export | %s |", format(nrow(candidates), big.mark = ",")),
+    sprintf("| Candidates | %s |", format(nrow(candidates), big.mark = ",")),
+    if ("source" %in% names(candidates)) {
+      src <- dplyr::count(candidates, source)
+      sprintf("| … found by %s | %s |", src$source, format(src$n, big.mark = ","))
+    },
     sprintf("| Fetched this run | %s |", if (is.na(fetched_ok)) "0 (all cached)" else format(fetched_ok, big.mark = ",")),
     sprintf("| Still failing after retry | %s |", failed),
     sprintf("| Kept (released, %d+ min, %d+ votes) | %s |", cfg$min_runtime, cfg$vote_floor,
             format(nrow(f), big.mark = ",")),
+    if ("source" %in% names(candidates)) {
+      kept_src <- dplyr::count(dplyr::semi_join(candidates, f, by = "tmdb_id"), source)
+      sprintf("| … kept that came in by %s | %s |", kept_src$source, format(kept_src$n, big.mark = ","))
+    },
     "",
     "## Coverage of kept films",
     "",

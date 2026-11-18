@@ -8,11 +8,13 @@ tar_source("R")
 list(
   tar_target(cfg, cinehood_config()),
 
-  # 1. Today's list of every TMDB movie ID, and the most popular ones to fetch.
-  #    Reuses an export on disk up to export_max_age_days old; set export_date
-  #    in R/config.R to pin a specific day.
+  # 1. Candidates, two ways in: the most popular films in TMDB's daily ID
+  #    export, plus every film with enough votes, searched year by year.
+  #    Both reuse what's on disk if under export_max_age_days old.
   tar_target(export_file, download_id_export(cfg$raw_dir, cfg$export_date, cfg$export_max_age_days), format = "file"),
-  tar_target(candidates, select_candidates(read_id_export(export_file), cfg$candidate_top_n)),
+  tar_target(popular, select_candidates(read_id_export(export_file), cfg$candidate_top_n)),
+  tar_target(discovered, discover_by_vote_count(cfg)),
+  tar_target(candidates, combine_candidates(popular, discovered)),
 
   # 2. Details for each candidate, cached as raw JSON under data/raw/movies.
   #    Always checked, so films past the 6-month refresh window get refetched.
