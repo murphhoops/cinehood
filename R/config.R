@@ -83,6 +83,9 @@ cinehood_config <- function() {
     # A neighborhood with more core films than this gets a close-up second
     # clustering of its own, and splits if that finds distinct groups.
     city_max_core  = 200,
+    # Films outside the clustering's core join the neighborhood where most of
+    # their this-many most similar core films live.
+    city_place_k   = 15,
     # Genre lines viewers notice more than any keyword overlap. A neighborhood
     # with at least this share on both sides of one is split in two.
     city_split_genres    = c("Horror", "Animation", "Documentary"),

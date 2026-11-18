@@ -250,23 +250,40 @@ test_that("plot events like murder and grief count as generic", {
                c("light", "light", "light", "light", "content"))
 })
 
-test_that("a few films across a hard line move to the nearest neighborhood on their side", {
-  cfg <- city_test_cfg(withr::local_tempdir())
+test_that("a few films across a hard line move to their most similar films on their side", {
   ids <- 1:100
-  # neighborhood 1: 57 ocean adventures + 3 documentaries; 2: 20 documentaries; 3: 20 more adventures far away
+  # neighborhood 1: 57 ocean adventures + 3 documentaries; 2: 20 documentaries; 3: 20 desert adventures
   label <- c(rep(1L, 60), rep(2L, 20), rep(3L, 20))
   genres <- dplyr::tibble(tmdb_id = ids,
                           genre = c(rep("Adventure", 57), rep("Documentary", 3), rep("Documentary", 20), rep("Adventure", 20)))
-  points <- rbind(matrix(0, 60, 2), matrix(1, 20, 2), matrix(5, 20, 2))
-  out <- enforce_hard_lines(label, ids, genres, points, cfg)
+  side <- hard_sides(ids, genres, c("Horror", "Animation", "Documentary"))
+  set.seed(3)
+  Z <- matrix(abs(rnorm(100 * 6, sd = 0.05)), 100)
+  Z[1:60, 1] <- Z[1:60, 1] + 1                 # ocean
+  Z[58:60, 2] <- Z[58:60, 2] + 1.2             # the 3 ocean documentaries lean documentary
+  Z[61:80, 2] <- Z[61:80, 2] + 1               # documentaries
+  Z[81:100, 3] <- Z[81:100, 3] + 1             # desert
+  out <- enforce_hard_lines(label, side, Z, k = 10)
   expect_equal(out$label[58:60], c(2L, 2L, 2L))      # the documentaries moved
   expect_equal(sum(out$moved), 3)
   expect_true(all(out$label[1:57] == 1L))            # the adventures stayed
   # with no documentary neighborhood to go to, they stay put
-  label2 <- c(rep(1L, 60), rep(3L, 20))
-  genres2 <- genres[c(1:60, 81:100), ]
-  out2 <- enforce_hard_lines(label2, genres2$tmdb_id, genres2, points[c(1:60, 81:100), ], cfg)
+  keep <- c(1:60, 81:100)
+  out2 <- enforce_hard_lines(label[keep], side[keep, , drop = FALSE], Z[keep, ], k = 10)
   expect_equal(sum(out2$moved), 0)
+})
+
+test_that("placed films join their most similar films, and respect hard lines", {
+  ids <- 1:60
+  genres <- dplyr::tibble(tmdb_id = ids, genre = c(rep("Drama", 20), rep("Horror", 20), rep("Drama", 20)))
+  side <- hard_sides(ids, genres, "Horror")
+  Z <- rbind(cbind(1, 0, matrix(0.01, 20, 2)), cbind(0, 1, matrix(0.01, 20, 2)), cbind(0.9, 0.1, matrix(0.01, 20, 2)))
+  core <- 1:40; core_label <- c(rep(1L, 20), rep(2L, 20))
+  # drama films 41:60 sit near hood 1
+  expect_true(all(place_by_neighbors(Z, 41:60, core, core_label, side, k = 5) == 1L))
+  # a horror film that looks like the dramas still goes to the horror neighborhood
+  side2 <- side; side2[41, 1] <- TRUE
+  expect_equal(place_by_neighbors(Z, 41L, core, core_label, side2, k = 5), 2L)
 })
 
 test_that("a big neighborhood with two clear groups inside is re-split", {
