@@ -52,12 +52,14 @@ cinehood_config <- function() {
     # and drop ones so common they say little (share of all films).
     city_kw_min_films = 5,
     city_kw_max_share = 0.10,
-    # Keywords about how a film was made or released rather than what it's
-    # like; left out so they don't pull unrelated films together.
-    city_kw_stoplist = c("woman director", "duringcreditsstinger", "aftercreditsstinger",
-                         "based on novel or book", "sequel", "remake",
-                         "based on comic", "based on manga", "based on video game",
-                         "based on play or musical", "based on short story"),
+    # Mood and production keywords are left out of the map automatically, and
+    # relationship, place and decade keywords count for less; the lists are in
+    # R/keyword_groups.R. Add any other keyword to leave out here.
+    city_kw_stoplist = character(),
+    city_light_weight = 0.5,   # weight of relationship / place / decade keywords
+    # Films with fewer content keywords than this don't help draw the map;
+    # they're placed into the nearest neighborhood afterwards, as a loose fit.
+    city_min_keywords = 3,
     # How much each kind of feature counts. Directors are deliberately absent:
     # neighborhoods are about what films are like, not who made them.
     # Keywords lead; the others nudge. On a made-up 14,000-film catalog with

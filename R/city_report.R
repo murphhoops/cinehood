@@ -13,11 +13,11 @@ distinctive_keywords <- function(film_groups, film_keywords, vocab, group_col, m
     dplyr::inner_join(film_groups, by = "tmdb_id") |>
     dplyr::count(.data[[group_col]], keyword_id, keyword, name = "n_in") |>
     dplyr::left_join(sizes, by = group_col) |>
-    dplyr::left_join(dplyr::select(vocab, keyword_id, df), by = "keyword_id") |>
+    dplyr::left_join(dplyr::select(vocab, keyword_id, df, weight), by = "keyword_id") |>
     dplyr::filter(n_in >= min_count) |>
     dplyr::mutate(share = n_in / n_group,
                   lift = share / (df / n_all),
-                  score = share * log(lift)) |>
+                  score = share * log(lift) * weight) |>
     dplyr::filter(lift > 1)
 }
 
@@ -143,11 +143,16 @@ city_report <- function(city, tabs, cfg) {
             format(q[[3]], big.mark = ",")),
     sprintf("| Neighborhoods under 20 films | %d |", sum(h$size < 20)),
     sprintf("| Neighborhoods over 150 films | %d |", sum(h$size > 150)),
+    sprintf("| Films placed in a neighborhood by the clustering (core) | %s (%s) |",
+            format(sum(fn$placement == "core"), big.mark = ","), pct(fn$placement == "core")),
     sprintf("| Films the clustering left unclaimed, moved to the nearest neighborhood | %s (%s) |",
-            format(sum(fn$from_noise), big.mark = ","), pct(fn$from_noise)),
-    sprintf("| Keywords used as features | %s |", format(city$feature_info$n_keywords, big.mark = ",")),
-    sprintf("| Films with no usable keyword (placed by genre, era, language) | %s |",
-            format(city$feature_info$films_without_keywords, big.mark = ",")),
+            format(sum(fn$placement == "nearest"), big.mark = ","), pct(fn$placement == "nearest")),
+    sprintf("| Films with under %d content keywords, placed afterwards as a loose fit | %s (%s) |",
+            cfg$city_min_keywords, format(sum(fn$placement == "loose fit"), big.mark = ","),
+            pct(fn$placement == "loose fit")),
+    sprintf("| Keywords used as features (of which counted at %s weight) | %s (%s) |",
+            cfg$city_light_weight, format(city$feature_info$n_keywords, big.mark = ","),
+            format(city$feature_info$n_light_keywords, big.mark = ",")),
     "",
     "## Districts",
     "",

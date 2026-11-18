@@ -1,9 +1,10 @@
 # Phase 2: the city. Films -> features -> a map -> neighborhoods -> districts.
 #
-#   city_features()   what each film is like, as numbers (no directors)
-#   city_embed()      compress, then lay films out so similar ones sit close
-#   city_neighborhoods()  find the clusters; place every film in one
-#   city_districts()  group neighborhoods into a few larger districts
+#   city_features()       what each film is like, as numbers (no directors)
+#   city_embed()          compress, then lay films out so similar ones sit close
+#   city_neighborhoods()  find the clusters
+#   build_city()          places every film, including the keyword-poor ones
+#   city_districts()      group neighborhoods into a few larger districts
 
 # ---- Features -------------------------------------------------------------
 
@@ -19,14 +20,19 @@ one_hot <- function(row_index, labels, n_rows) {
                        dims = c(n_rows, length(lv)), dimnames = list(NULL, lv))
 }
 
-# Which keywords describe films well: used by enough films to matter, not so
-# many that they say nothing, and not on the stoplist.
+# Which keywords build the map: content keywords at full weight, generic ones
+# (relationships, places, decades a film is set in) at reduced weight, mood and
+# production keywords left out (see R/keyword_groups.R). Each must be used by
+# enough films to matter and not so many that it says nothing.
 keyword_vocab <- function(film_keywords, n_films, cfg) {
   film_keywords |>
     dplyr::distinct(tmdb_id, keyword_id, keyword) |>
-    dplyr::filter(!tolower(keyword) %in% tolower(cfg$city_kw_stoplist)) |>
     dplyr::count(keyword_id, keyword, name = "df") |>
-    dplyr::filter(df >= cfg$city_kw_min_films, df / n_films <= cfg$city_kw_max_share)
+    dplyr::mutate(kind = classify_keyword(keyword, keyword_id)) |>
+    dplyr::filter(kind %in% c("content", "light"),
+                  !tolower(keyword) %in% tolower(cfg$city_kw_stoplist),
+                  df >= cfg$city_kw_min_films, df / n_films <= cfg$city_kw_max_share) |>
+    dplyr::mutate(weight = ifelse(kind == "light", cfg$city_light_weight, 1))
 }
 
 city_features <- function(spine, cfg) {
@@ -34,14 +40,17 @@ city_features <- function(spine, cfg) {
   n <- nrow(films)
   row_of <- function(ids) match(ids, films$tmdb_id)
 
-  # Keywords: TF-IDF (each keyword once per film), each film scaled to length 1.
+  # Keywords: TF-IDF (each keyword once per film) times the keyword's weight,
+  # each film scaled to length 1.
   vocab <- keyword_vocab(dplyr::filter(spine$film_keywords, tmdb_id %in% films$tmdb_id), n, cfg)
   kw <- spine$film_keywords |>
     dplyr::distinct(tmdb_id, keyword_id) |>
     dplyr::filter(keyword_id %in% vocab$keyword_id, tmdb_id %in% films$tmdb_id)
   X_kw <- Matrix::sparseMatrix(i = row_of(kw$tmdb_id), j = match(kw$keyword_id, vocab$keyword_id),
                                x = 1, dims = c(n, nrow(vocab)))
-  X_kw <- l2_rows(X_kw %*% Matrix::Diagonal(x = log(n / vocab$df)))
+  n_kw <- as.integer(Matrix::rowSums(X_kw))
+  n_content <- as.integer(Matrix::rowSums(X_kw[, vocab$kind == "content", drop = FALSE]))
+  X_kw <- l2_rows(X_kw %*% Matrix::Diagonal(x = log(n / vocab$df) * vocab$weight))
 
   # The smaller features, kept apart from the keywords so they can't crowd
   # them out of the compression step (see city_embed).
@@ -59,7 +68,7 @@ city_features <- function(spine, cfg) {
                 runtime = cfg$city_w_runtime * z(log(films$runtime)))
 
   list(X_kw = X_kw, side = side, tmdb_id = films$tmdb_id, vocab = vocab,
-       films_without_keywords = sum(Matrix::rowSums(X_kw) == 0))
+       n_keywords = n_kw, n_content_keywords = n_content)
 }
 
 # ---- Layout ----------------------------------------------------------------
@@ -69,31 +78,40 @@ city_features <- function(spine, cfg) {
 # side features (genre, language, year, runtime) are then added back at their
 # weights. Compressing everything together let the few big side features
 # take over and sorted the city by genre and era instead of content.
-# Then UMAP twice: a 10-dimensional layout to find neighborhoods in, and a
-# 2-dimensional one to draw the city.
-city_embed <- function(feat, cfg) {
-  X <- feat$X_kw
-  k <- min(cfg$city_svd_dims, nrow(X) - 1, ncol(X) - 1)
+#
+# The layout is learned from the films in `fit` (those with enough keywords),
+# then the rest are placed onto it, so films with little to go on can't form
+# neighborhoods of their own. UMAP runs twice: a 10-dimensional layout to find
+# neighborhoods in, and a 2-dimensional one to draw the city.
+city_embed <- function(feat, cfg, fit = rep(TRUE, nrow(feat$X_kw))) {
+  X_fit <- feat$X_kw[fit, , drop = FALSE]
+  k <- min(cfg$city_svd_dims, nrow(X_fit) - 1, ncol(X_fit) - 1)
   set.seed(cfg$city_seed)
-  sv <- if (k >= 0.5 * min(dim(X))) {
-    full <- svd(as.matrix(X), nu = k, nv = 0)   # small data: exact SVD
-    list(u = full$u, d = full$d[seq_len(k)])
+  V <- if (k >= 0.5 * min(dim(X_fit))) {
+    svd(as.matrix(X_fit), nu = 0, nv = k)$v          # small data: exact SVD
   } else {
-    irlba::irlba(X, nv = k)
+    irlba::irlba(X_fit, nv = k)$v
   }
-  Z_kw <- sv$u %*% diag(sv$d, nrow = k)
+  Z_kw <- as.matrix(feat$X_kw %*% V)                 # every film, same projection
   len <- sqrt(rowSums(Z_kw^2))
   Z_kw <- cfg$city_w_keywords * Z_kw / ifelse(len > 0, len, 1)
   Z <- cbind(Z_kw, feat$side)
 
-  nn <- min(cfg$city_neighbors, nrow(Z) - 1)
-  set.seed(cfg$city_seed)
-  for_clusters <- uwot::umap(Z, n_neighbors = nn, n_components = 10, min_dist = 0,
-                             metric = "cosine", n_threads = 1, n_sgd_threads = 1)
-  set.seed(cfg$city_seed)
-  for_map <- uwot::umap(Z, n_neighbors = nn, n_components = 2, min_dist = 0.1,
-                        metric = "cosine", n_threads = 1, n_sgd_threads = 1)
-  list(svd = Z, cluster_space = for_clusters, map = for_map)
+  layout <- function(dims, min_dist) {
+    nn <- min(cfg$city_neighbors, sum(fit) - 1)
+    set.seed(cfg$city_seed)
+    m <- uwot::umap(Z[fit, , drop = FALSE], n_neighbors = nn, n_components = dims,
+                    min_dist = min_dist, metric = "cosine", n_threads = 1, n_sgd_threads = 1,
+                    ret_model = TRUE)
+    out <- matrix(NA_real_, nrow(Z), dims)
+    out[fit, ] <- m$embedding
+    if (any(!fit)) {
+      set.seed(cfg$city_seed)
+      out[!fit, ] <- uwot::umap_transform(Z[!fit, , drop = FALSE], m, n_threads = 1, n_sgd_threads = 1)
+    }
+    out
+  }
+  list(svd = Z, cluster_space = layout(10, 0), map = layout(2, 0.1))
 }
 
 # ---- Neighborhoods ---------------------------------------------------------
@@ -103,42 +121,39 @@ centroids_of <- function(points, labels) {
   t(vapply(ids, function(k) colMeans(points[labels == k, , drop = FALSE]), numeric(ncol(points))))
 }
 
+# Index of the nearest center (rows of `cents`) for each row of `p`.
+nearest_center <- function(p, cents) {
+  d2 <- outer(rowSums(p^2), rowSums(cents^2), "+") - 2 * p %*% t(cents)
+  max.col(-d2, ties.method = "first")
+}
+
 # HDBSCAN finds dense groups and leaves some films unclaimed ("noise"). In a
 # city everyone lives somewhere, so each unclaimed film moves to the nearest
 # neighborhood, and is flagged so we can see how many did.
-city_neighborhoods <- function(emb, cfg) {
-  hd <- dbscan::hdbscan(emb$cluster_space, minPts = cfg$city_min_pts)
+city_neighborhoods <- function(points, cfg) {
+  hd <- dbscan::hdbscan(points, minPts = cfg$city_min_pts)
   lab <- hd$cluster
   if (all(lab == 0)) stop("No neighborhoods found; try a smaller city_min_pts.", call. = FALSE)
-
   clustered <- lab > 0
-  cents <- centroids_of(emb$cluster_space[clustered, , drop = FALSE], lab[clustered])
+  cents <- centroids_of(points[clustered, , drop = FALSE], lab[clustered])
   cluster_ids <- sort(unique(lab[clustered]))
   if (any(!clustered)) {
-    p <- emb$cluster_space[!clustered, , drop = FALSE]
-    d2 <- outer(rowSums(p^2), rowSums(cents^2), "+") - 2 * p %*% t(cents)
-    lab[!clustered] <- cluster_ids[max.col(-d2, ties.method = "first")]
+    lab[!clustered] <- cluster_ids[nearest_center(points[!clustered, , drop = FALSE], cents)]
   }
-
-  # Number neighborhoods by size, largest first.
-  sizes <- sort(table(lab), decreasing = TRUE)
-  new_id <- stats::setNames(seq_along(sizes), names(sizes))
-  list(neighborhood = unname(new_id[as.character(lab)]),
-       from_noise = !clustered,
-       membership = hd$membership_prob)
+  list(label = lab, from_noise = !clustered, membership = hd$membership_prob)
 }
 
 # ---- Districts -------------------------------------------------------------
 
 # Group neighborhoods whose centers sit close together into districts.
-city_districts <- function(emb, hood, cfg) {
-  cents <- centroids_of(emb$cluster_space, hood$neighborhood)
+city_districts <- function(points, neighborhood, cfg) {
+  cents <- centroids_of(points, neighborhood)
   n_hoods <- nrow(cents)
   k <- min(cfg$city_districts, n_hoods)
   district_of_hood <- if (k < 2) rep(1L, n_hoods) else
     stats::cutree(stats::hclust(stats::dist(cents), method = "ward.D2"), k = k)
   # Number districts by how many films they hold, largest first.
-  films_per <- tapply(rep(1, length(hood$neighborhood)), district_of_hood[hood$neighborhood], sum)
+  films_per <- tapply(rep(1, length(neighborhood)), district_of_hood[neighborhood], sum)
   order_ids <- as.integer(names(sort(films_per, decreasing = TRUE)))
   renum <- stats::setNames(seq_along(order_ids), order_ids)
   unname(renum[as.character(district_of_hood)])
@@ -148,16 +163,44 @@ city_districts <- function(emb, hood, cfg) {
 
 build_city <- function(spine, cfg) {
   feat <- city_features(spine, cfg)
-  emb  <- city_embed(feat, cfg)
-  hood <- city_neighborhoods(emb, cfg)
-  district_of_hood <- city_districts(emb, hood, cfg)
+
+  # Films with too few content keywords to say what they're about are placed
+  # onto the map afterwards, into the nearest neighborhood, as a looser fit.
+  rich <- feat$n_content_keywords >= cfg$city_min_keywords
+  if (sum(rich) < 2 * cfg$city_min_pts) {
+    stop("Too few films with ", cfg$city_min_keywords, "+ keywords to build a city.", call. = FALSE)
+  }
+  emb <- city_embed(feat, cfg, fit = rich)
+
+  hood <- city_neighborhoods(emb$cluster_space[rich, , drop = FALSE], cfg)
+  label <- integer(nrow(emb$cluster_space))
+  label[rich] <- hood$label
+  if (any(!rich)) {
+    cents <- centroids_of(emb$cluster_space[rich, , drop = FALSE], hood$label)
+    ids <- sort(unique(hood$label))
+    label[!rich] <- ids[nearest_center(emb$cluster_space[!rich, , drop = FALSE], cents)]
+  }
+
+  # Number neighborhoods by size, largest first.
+  sizes <- sort(table(label), decreasing = TRUE)
+  new_id <- stats::setNames(seq_along(sizes), names(sizes))
+  neighborhood <- unname(new_id[as.character(label)])
+  district_of_hood <- city_districts(emb$cluster_space, neighborhood, cfg)
+
+  placement <- rep("core", length(label))
+  placement[rich][hood$from_noise] <- "nearest"
+  placement[!rich] <- "loose fit"
+  membership <- rep(NA_real_, length(label))
+  membership[rich] <- hood$membership
 
   film_neighborhoods <- dplyr::tibble(
     tmdb_id = feat$tmdb_id,
-    neighborhood_id = hood$neighborhood,
-    district_id = district_of_hood[hood$neighborhood],
-    from_noise = hood$from_noise,
-    membership = hood$membership,
+    neighborhood_id = neighborhood,
+    district_id = district_of_hood[neighborhood],
+    placement = placement,
+    from_noise = placement != "core",
+    membership = membership,
+    n_keywords = feat$n_content_keywords,
     x = emb$map[, 1],
     y = emb$map[, 2]
   )
@@ -168,6 +211,8 @@ build_city <- function(spine, cfg) {
   list(film_neighborhoods = film_neighborhoods,
        cluster_space = cluster_space,
        feature_info = list(n_keywords = nrow(feat$vocab),
-                           films_without_keywords = feat$films_without_keywords,
+                           n_light_keywords = sum(feat$vocab$kind == "light"),
+                           films_without_keywords = sum(feat$n_keywords == 0),
+                           films_loose = sum(!rich),
                            n_features = ncol(feat$X_kw) + ncol(feat$side)))
 }

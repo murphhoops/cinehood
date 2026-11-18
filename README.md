@@ -91,10 +91,11 @@ It takes a few minutes. It reads phase 1's tables, so run phase 1 first.
 
 | Step | What it does |
 | --- | --- |
-| Features | Each film described by its keywords (TF-IDF, the main signal), genres, release year, language and runtime. **No directors**: neighborhoods are about what films are like, not who made them. Production keywords ("sequel", "woman director", "based on novel or book") are left out |
+| Features | Each film described by its keywords (TF-IDF, the main signal), genres, release year, language and runtime. **No directors**: neighborhoods are about what films are like, not who made them |
+| Keyword sorting | `R/keyword_groups.R` sorts keywords: **mood** words ("admiring", "suspenseful"; TMDB's mood tags are IDs 325761–325857) and **production** words ("sequel", "black and white", "based on novel or book") are left out of the map; **generic** ones (relationships, places, the decade a film is set in) count at half weight |
 | Compress | Keywords are compressed on their own (truncated SVD, 100 dimensions), then genre, language, year and runtime are added back at light weights so they nudge rather than dominate |
-| Layout | UMAP twice: 10 dimensions to find neighborhoods in, 2 for the map |
-| Neighborhoods | HDBSCAN finds dense groups (15+ films). Films it leaves unclaimed move to the nearest neighborhood and are flagged |
+| Layout | UMAP twice: 10 dimensions to find neighborhoods in, 2 for the map. Learned only from films with 3+ content keywords; the rest are placed onto it afterwards |
+| Neighborhoods | HDBSCAN finds dense groups (15+ films). Films it leaves unclaimed, and films with too few keywords, move to the nearest neighborhood; `placement` says which (`core`, `nearest`, `loose fit`) |
 | Districts | Neighborhoods whose centers sit close together are grouped into 20 districts |
 | Names | Draft names from each neighborhood's most distinctive keywords (common inside it, rarer outside) |
 

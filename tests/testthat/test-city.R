@@ -131,3 +131,61 @@ test_that("the same settings give the same city", {
   b <- build_city(spine, cfg)$film_neighborhoods
   expect_equal(a$neighborhood_id, b$neighborhood_id)
 })
+
+test_that("keywords are sorted into tone, production, light and content", {
+  k <- dplyr::tribble(
+    ~keyword, ~keyword_id, ~kind,
+    "admiring", 325761L, "tone",          # TMDB's mood-tag block
+    "wry", 325857L, "tone",
+    "suspenseful", 314730L, "tone",       # older mood word
+    "black and white", 12999L, "production",
+    "sequel", 9663L, "production",
+    "father daughter relationship", 240303L, "light",
+    "los angeles, california", 12670L, "light",
+    "1970s", 1228L, "light",
+    "19th century", 207928L, "light",
+    "new york city", 242L, "light",
+    "heist", 10051L, "content",
+    "kaiju", 161791L, "content",
+    "film noir", 9807L, "content"
+  )
+  expect_equal(classify_keyword(k$keyword, k$keyword_id), k$kind)
+})
+
+test_that("mood and production keywords stay out of the map; generic ones count for less", {
+  spine <- fake_city_spine(per_group = 20)
+  extra <- dplyr::bind_rows(
+    dplyr::tibble(tmdb_id = 1:60, keyword = "admiring", keyword_id = 325761L),
+    dplyr::tibble(tmdb_id = 1:60, keyword = "black and white", keyword_id = 12999L),
+    dplyr::tibble(tmdb_id = 1:8, keyword = "father son relationship", keyword_id = 240119L))
+  spine$film_keywords <- dplyr::bind_rows(spine$film_keywords, extra)
+  cfg <- city_test_cfg(withr::local_tempdir())
+  vocab <- keyword_vocab(spine$film_keywords, nrow(spine$films), cfg)
+  expect_false(any(c("admiring", "black and white") %in% vocab$keyword))
+  expect_equal(vocab$weight[vocab$keyword == "father son relationship"], 0.5)
+  expect_true(all(vocab$weight[vocab$kind == "content"] == 1))
+})
+
+test_that("films with too few keywords are placed afterwards, near their own kind", {
+  spine <- fake_city_spine()
+  # 15 extra heist films that carry only 2 heist keywords each
+  sparse_ids <- 1000L + 1:15
+  spine$films <- dplyr::bind_rows(spine$films, dplyr::tibble(
+    tmdb_id = sparse_ids, title = paste("thin heist", 1:15), year = 2005L,
+    original_language = "en", runtime = 110L, vote_count = 500L, true_group = "heist"))
+  thin_kw <- dplyr::tibble(tmdb_id = rep(sparse_ids, each = 2), keyword = rep(c("heist_kw1", "heist_kw2"), 15))
+  thin_kw$keyword_id <- spine$film_keywords$keyword_id[match(thin_kw$keyword, spine$film_keywords$keyword)]
+  spine$film_keywords <- dplyr::bind_rows(spine$film_keywords, thin_kw)
+  spine$film_genres <- dplyr::bind_rows(spine$film_genres, dplyr::tibble(tmdb_id = sparse_ids, genre = "Crime"))
+
+  cfg <- city_test_cfg(withr::local_tempdir())
+  fn <- build_city(spine, cfg)$film_neighborhoods
+  thin <- fn[fn$tmdb_id %in% sparse_ids, ]
+  expect_true(all(thin$placement == "loose fit"))
+  expect_true(all(fn$placement[!fn$tmdb_id %in% sparse_ids] %in% c("core", "nearest")))
+  heist_home <- fn |> dplyr::filter(tmdb_id <= 400) |>
+    dplyr::inner_join(spine$films, by = "tmdb_id") |> dplyr::filter(true_group == "heist") |>
+    dplyr::count(neighborhood_id, sort = TRUE) |> dplyr::slice(1) |> dplyr::pull(neighborhood_id)
+  expect_gt(mean(thin$neighborhood_id == heist_home), 0.8)
+  expect_false(anyNA(thin$x))
+})
