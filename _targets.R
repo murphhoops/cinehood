@@ -26,5 +26,12 @@ list(
 
   # 5. Outputs: one file per table in data/spine, plus a report.
   tar_target(spine_files, write_spine(spine, cfg$out_dir), format = "file"),
-  tar_target(report, spine_report(spine, candidates, fetch_log, cfg), format = "file")
+  tar_target(report, spine_report(spine, candidates, fetch_log, cfg), format = "file"),
+
+  # Phase 2: the city. Neighborhoods and districts from the spine.
+  tar_target(city, build_city(spine, cfg)),
+  tar_target(city_tabs, city_tables(city, spine, cfg)),
+  tar_target(city_files, write_city(city, city_tabs, cfg), format = "file"),
+  tar_target(city_map_file, city_map(city, city_tabs, cfg), format = "file"),
+  tar_target(city_report_file, city_report(city, city_tabs, cfg), format = "file")
 )

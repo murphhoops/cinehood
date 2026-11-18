@@ -76,6 +76,44 @@ testthat::test_dir("tests/testthat")
 
 They run on made-up fixture films in `tests/testthat/fixtures/`, no API calls.
 
+## Phase 2: the city
+
+Groups the catalog into **neighborhoods** (micro-genres) and **districts** (groups of neighborhoods), and lays every film out on a 2D map.
+
+```r
+source("setup.R")        # once: adds Matrix, irlba, uwot, dbscan, ggplot2
+source("run_phase2.R")   # or targets::tar_make(), which runs both phases
+```
+
+It takes a few minutes. It reads phase 1's tables, so run phase 1 first.
+
+### How it works
+
+| Step | What it does |
+| --- | --- |
+| Features | Each film described by its keywords (TF-IDF, the main signal), genres, release year, language and runtime. **No directors**: neighborhoods are about what films are like, not who made them. Production keywords ("sequel", "woman director", "based on novel or book") are left out |
+| Compress | Keywords are compressed on their own (truncated SVD, 100 dimensions), then genre, language, year and runtime are added back at light weights so they nudge rather than dominate |
+| Layout | UMAP twice: 10 dimensions to find neighborhoods in, 2 for the map |
+| Neighborhoods | HDBSCAN finds dense groups (15+ films). Films it leaves unclaimed move to the nearest neighborhood and are flagged |
+| Districts | Neighborhoods whose centers sit close together are grouped into 20 districts |
+| Names | Draft names from each neighborhood's most distinctive keywords (common inside it, rarer outside) |
+
+### What comes out
+
+In `data/city/`:
+
+| File | What it holds |
+| --- | --- |
+| `film_neighborhoods` | Each film's neighborhood, district, map position (x, y), and whether it was placed after being left unclaimed |
+| `neighborhoods` | Each neighborhood: draft name, size, district, years, top genres, top keywords, example films, map center |
+| `districts` | The same for districts |
+| `cluster_space` | Each film's 10-dimensional position, used later to place new films |
+| `neighborhood_names.csv` | A sheet for naming by hand: fill in `your_name` |
+
+And in `data/checks/`: `city_report.md` (summary, districts, biggest neighborhoods, and 20 random neighborhoods to check by eye) and `city_map.png`.
+
+All settings are in `R/config.R` under "Phase 2". `tools/check_city_scale.R` tests the method on a made-up catalog the size of the real one.
+
 ## Data and attribution
 
 Film data comes from [TMDB](https://www.themoviedb.org/). This product uses the TMDB API but is not endorsed or certified by TMDB. TMDB's API is free for non-commercial use; commercial use needs a separate agreement with TMDB. Cached TMDB data must not be kept longer than six months, which the refresh window in `R/config.R` enforces.
