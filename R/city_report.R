@@ -164,6 +164,8 @@ city_report <- function(city, tabs, cfg) {
             pct(fn$placement == "loose fit")),
     sprintf("| Neighborhoods split on a hard genre line (%s) | %d |",
             paste(cfg$city_split_genres, collapse = ", "), city$feature_info$genre_splits %||% 0L),
+    sprintf("| Big neighborhoods re-split after a close-up look (over %s core films) | %s |",
+            cfg$city_max_core %||% 200, city$feature_info$big_resplits %||% 0L),
     sprintf("| Films moved to a neighborhood on their side of a hard genre line | %s |",
             format(city$feature_info$genre_moves %||% 0L, big.mark = ",")),
     sprintf("| Keywords used as features (of which counted at %s weight) | %s (%s) |",

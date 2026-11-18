@@ -80,6 +80,9 @@ cinehood_config <- function() {
     city_neighbors = 30,   # UMAP: how local the structure it keeps is
     city_min_pts   = 15,   # HDBSCAN: smallest group that counts as a neighborhood
     city_districts = 20,   # neighborhoods grouped into this many districts
+    # A neighborhood with more core films than this gets a close-up second
+    # clustering of its own, and splits if that finds distinct groups.
+    city_max_core  = 200,
     # Genre lines viewers notice more than any keyword overlap. A neighborhood
     # with at least this share on both sides of one is split in two.
     city_split_genres    = c("Horror", "Animation", "Documentary"),

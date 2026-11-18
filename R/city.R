@@ -143,6 +143,41 @@ city_neighborhoods <- function(points, cfg) {
   list(label = lab, from_noise = !clustered, membership = hd$membership_prob)
 }
 
+# Seen from the whole city, a big stretch of films can look like one uniform
+# neighborhood (all the love-and-loss dramas, say) even when it has clear
+# streets of its own. Each neighborhood with more than `city_max_core` core
+# films gets its own close-up layout and clustering; if that finds two or
+# more groups, it becomes those groups. Repeats until nothing splits.
+split_big_neighborhoods <- function(label, Z, cfg) {
+  resplits <- 0L
+  for (round in 1:3) {
+    sizes <- table(label)
+    big <- as.integer(names(sizes)[sizes > cfg$city_max_core])
+    if (!length(big)) break
+    changed <- FALSE
+    for (L in big) {
+      in_L <- which(label == L)
+      set.seed(cfg$city_seed)
+      local <- uwot::umap(Z[in_L, , drop = FALSE], n_neighbors = min(cfg$city_neighbors, length(in_L) - 1),
+                          n_components = 10, min_dist = 0, metric = "cosine",
+                          n_threads = 1, n_sgd_threads = 1)
+      sub <- dbscan::hdbscan(local, minPts = cfg$city_min_pts)$cluster
+      if (length(unique(sub[sub > 0])) < 2) next
+      if (any(sub == 0)) {
+        cents <- centroids_of(local[sub > 0, , drop = FALSE], sub[sub > 0])
+        sub[sub == 0] <- sort(unique(sub[sub > 0]))[nearest_center(local[sub == 0, , drop = FALSE], cents)]
+      }
+      top <- max(label)
+      label[in_L] <- ifelse(sub == sub[1], L, top + match(sub, setdiff(sort(unique(sub)), sub[1])))
+      label[in_L] <- as.integer(label[in_L])
+      resplits <- resplits + 1L
+      changed <- TRUE
+    }
+    if (!changed) break
+  }
+  list(label = label, resplits = resplits)
+}
+
 # ---- Districts -------------------------------------------------------------
 
 # Group neighborhoods whose centers sit close together into districts.
@@ -241,6 +276,8 @@ build_city <- function(spine, cfg) {
   emb <- city_embed(feat, cfg, fit = rich)
 
   hood <- city_neighborhoods(emb$cluster_space[rich, , drop = FALSE], cfg)
+  big <- split_big_neighborhoods(hood$label, emb$svd[rich, , drop = FALSE], cfg)
+  hood$label <- big$label
   label <- integer(nrow(emb$cluster_space))
   label[rich] <- hood$label
   if (any(!rich)) {
@@ -292,6 +329,7 @@ build_city <- function(spine, cfg) {
                            films_without_keywords = sum(feat$n_keywords == 0),
                            films_loose = sum(!rich),
                            genre_splits = split$splits,
+                           big_resplits = big$resplits,
                            genre_moves = sum(crossed$moved),
                            n_features = ncol(feat$X_kw) + ncol(feat$side)))
 }

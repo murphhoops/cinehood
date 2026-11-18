@@ -268,3 +268,19 @@ test_that("a few films across a hard line move to the nearest neighborhood on th
   out2 <- enforce_hard_lines(label2, genres2$tmdb_id, genres2, points[c(1:60, 81:100), ], cfg)
   expect_equal(sum(out2$moved), 0)
 })
+
+test_that("a big neighborhood with two clear groups inside is re-split", {
+  set.seed(1)
+  a <- matrix(rnorm(150 * 20, sd = 0.05), 150) ; a[, 1:10] <- a[, 1:10] + 1
+  b <- matrix(rnorm(150 * 20, sd = 0.05), 150) ; b[, 11:20] <- b[, 11:20] + 1
+  Z <- rbind(a, b)
+  cfg <- cinehood_config(); cfg$city_max_core <- 200
+  out <- split_big_neighborhoods(rep(1L, 300), Z, cfg)
+  expect_equal(out$resplits, 1L)
+  expect_equal(length(unique(out$label)), 2)
+  expect_true(all(out$label[1:150] == out$label[1]))
+  expect_true(all(out$label[151:300] == out$label[151]))
+
+  small <- split_big_neighborhoods(rep(1L, 300), Z, modifyList(cfg, list(city_max_core = 400)))
+  expect_equal(small$resplits, 0L)
+})

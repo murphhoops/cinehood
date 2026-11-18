@@ -49,14 +49,15 @@ PRODUCTION <- c(
 # Generic family and relationship words that aren't caught by the pattern below,
 # plot events that happen in every genre, and common places.
 LIGHT_EXTRA <- c(
-  # plot events: a murder or a funeral says little about what kind of film it is
+  # plot events: a murder or a funeral says little about what kind of film it is.
+  # Life events that define a kind of drama (a wedding, a cancer diagnosis, a
+  # divorce, a pregnancy) stay full weight.
   "murder", "death", "dying and death", "loss of loved one", "grief", "grieving",
   "mourning", "funeral", "loss", "kidnapping", "ransom", "hostage", "revenge",
   "vengeance", "betrayal", "blackmail", "suicide", "suicide attempt", "lie", "lying",
   "secret", "deception", "jealousy", "obsession", "escape", "rescue", "chase",
   "fight", "fighting", "investigation", "money", "greed", "guilt", "redemption",
-  "second chance", "forgiveness", "pregnancy", "wedding", "divorce", "illness",
-  "terminal illness", "cancer", "car accident", "accident", "dead body", "corpse",
+  "second chance", "forgiveness", "car accident", "accident", "dead body", "corpse",
   "killing", "killer", "violence", "gun", "explosion", "shootout",
   "family", "friendship", "love", "marriage", "friends", "best friend", "best friends",
   "daughter", "father", "mother", "son", "brother", "sister", "sibling", "siblings",
