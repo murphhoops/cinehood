@@ -27,3 +27,20 @@ tmdb_movie_request <- function(id, token = tmdb_token(), language = "en-US") {
     # result to record rather than an error that stops the run.
     httr2::req_error(is_error = function(resp) FALSE)
 }
+
+# Send a request, and if the connection itself fails (reset, timeout, DNS
+# blip), wait and try again. HTTP errors such as 429 are handled separately by
+# each request's req_retry(); this covers the network dropping out underneath.
+perform_with_retry <- function(req, tries = 5, waits = c(2, 5, 10, 20),
+                               perform = httr2::req_perform, sleep = Sys.sleep) {
+  for (k in seq_len(tries)) {
+    res <- tryCatch(perform(req), error = function(e) e)
+    if (!inherits(res, "error")) return(res)
+    if (k < tries) {
+      wait <- waits[min(k, length(waits))]
+      message("connection problem (", conditionMessage(res), "); retrying in ", wait, "s")
+      sleep(wait)
+    }
+  }
+  stop(res)
+}

@@ -70,7 +70,7 @@ fetch_movies <- function(ids, cfg, token = tmdb_token()) {
     for (id in retry) {
       req <- tmdb_movie_request(id, token = token, language = cfg$language) |>
         httr2::req_retry(max_tries = 4, is_transient = function(r) httr2::resp_status(r) %in% c(429, 500, 502, 503, 504))
-      res <- tryCatch(httr2::req_perform(req), error = function(e) e)
+      res <- tryCatch(perform_with_retry(req), error = function(e) e)
       log <- dplyr::rows_update(log, handle_batch(id, list(res), cfg$raw_dir), by = "tmdb_id")
     }
   }

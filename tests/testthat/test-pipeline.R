@@ -206,3 +206,49 @@ test_that("the report breaks candidates and kept films down by source", {
   expect_true(any(grepl("found by vote count \\| 1 \\|", txt)))
   expect_true(any(grepl("kept that came in by both \\| 1 \\|", txt)))
 })
+
+test_that("a dropped connection is retried, and gives up cleanly after the last try", {
+  n <- 0
+  flaky <- function(req) { n <<- n + 1; if (n < 3) stop("Recv failure: Connection was reset") else "ok" }
+  expect_equal(suppressMessages(perform_with_retry("req", perform = flaky, sleep = function(s) NULL)), "ok")
+  expect_equal(n, 3)
+  dead <- function(req) stop("Connection was reset")
+  expect_error(suppressMessages(perform_with_retry("req", tries = 2, perform = dead, sleep = function(s) NULL)),
+               "Connection was reset")
+})
+
+test_that("a failed year stops the search with a clear note, and a rerun finishes only that year", {
+  dir <- withr::local_tempdir()
+  cfg <- test_cfg(dir)
+  cfg$discover_first_year <- 2024
+  good <- fake_discover(list("2024" = 3, "2025" = 25, "2026" = 2))
+  broken_2025 <- function(year, page) if (year == 2025) stop("Connection was reset") else good$fetch(year, page)
+  expect_error(suppressMessages(
+    discover_by_vote_count(cfg, token = "x", today = as.Date("2026-11-17"), fetch = broken_2025)),
+    "1 year\\(s\\): 2025")
+  partial <- file.path(cfg$raw_dir, "discover", "partial")
+  expect_true(file.exists(file.path(partial, "2024.rds")))
+  expect_true(file.exists(file.path(partial, "2026.rds")))
+
+  asked <- integer()
+  watch <- function(year, page) { asked <<- c(asked, year); good$fetch(year, page) }
+  out <- suppressMessages(discover_by_vote_count(cfg, token = "x", today = as.Date("2026-11-17"), fetch = watch))
+  expect_equal(unique(asked), 2025)        # only the missing year
+  expect_equal(nrow(out), 30)
+  expect_false(dir.exists(partial))        # cleaned up once complete
+})
+
+test_that("a partial search older than the reuse window starts over", {
+  dir <- withr::local_tempdir()
+  cfg <- test_cfg(dir)
+  cfg$discover_first_year <- 2025
+  partial <- file.path(cfg$raw_dir, "discover", "partial")
+  dir.create(partial, recursive = TRUE)
+  writeLines("2026-10-01", file.path(partial, "started.txt"))
+  saveRDS(dplyr::tibble(tmdb_id = 1L, original_title = "stale", discover_votes = 1L, discover_popularity = 1),
+          file.path(partial, "2025.rds"))
+  f <- fake_discover(list("2025" = 2, "2026" = 1))
+  out <- suppressMessages(discover_by_vote_count(cfg, token = "x", today = as.Date("2026-11-17"), fetch = f$fetch))
+  expect_false("stale" %in% out$original_title)
+  expect_equal(nrow(out), 3)
+})

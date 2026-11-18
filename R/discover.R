@@ -55,7 +55,7 @@ discover_by_vote_count <- function(cfg, token = tmdb_token(),
   dir <- file.path(cfg$raw_dir, "discover")
   dir.create(dir, recursive = TRUE, showWarnings = FALSE)
 
-  # Reuse a recent sweep, like the ID export, so reruns don't repeat it.
+  # Reuse a recent finished sweep, like the ID export, so reruns don't repeat it.
   saved <- list.files(dir, pattern = "^discover_\\d{4}-\\d{2}-\\d{2}\\.rds$", full.names = TRUE)
   if (length(saved)) {
     dates <- as.Date(sub("^discover_(.*)\\.rds$", "\\1", basename(saved)))
@@ -70,18 +70,54 @@ discover_by_vote_count <- function(cfg, token = tmdb_token(),
     fetch <- function(year, page) {
       tmdb_discover_request(year, page, cfg$discover_vote_floor, token, cfg$language) |>
         httr2::req_throttle(rate = cfg$rate_per_sec) |>
-        httr2::req_perform() |>
+        perform_with_retry() |>
         httr2::resp_body_json()
     }
   }
 
+  # Each finished year is saved as it completes, so a dropped connection costs
+  # only the year it hit. A partial sweep older than the reuse window starts over.
+  partial <- file.path(dir, "partial")
+  stamp <- file.path(partial, "started.txt")
+  if (file.exists(stamp)) {
+    started <- as.Date(readLines(stamp, warn = FALSE)[1])
+    if (is.na(started) || as.numeric(today - started) > cfg$export_max_age_days) {
+      unlink(partial, recursive = TRUE)
+    }
+  }
+  if (!dir.exists(partial)) {
+    dir.create(partial, recursive = TRUE)
+    writeLines(as.character(today), stamp)
+  }
+
   years <- seq(cfg$discover_first_year, as.integer(format(today, "%Y")))
-  found <- lapply(years, function(y) {
+  year_file <- function(y) file.path(partial, paste0(y, ".rds"))
+  todo <- years[!file.exists(year_file(years))]
+  if (length(todo) < length(years)) {
+    message("vote-count search: resuming, ", length(years) - length(todo), " years already done")
+  }
+
+  failed <- integer()
+  for (y in todo) {
     if (y %% 10 == 0) message("vote-count search: ", y)
-    discover_year(y, fetch)
-  })
-  out <- dplyr::bind_rows(found) |> dplyr::distinct(tmdb_id, .keep_all = TRUE)
+    res <- tryCatch(discover_year(y, fetch), error = function(e) e)
+    if (inherits(res, "error")) {
+      message("vote-count search: couldn't finish ", y, " (", conditionMessage(res), ")")
+      failed <- c(failed, y)
+      next
+    }
+    saveRDS(res, year_file(y))
+  }
+  if (length(failed)) {
+    stop("The vote-count search couldn't reach TMDB for ", length(failed), " year(s): ",
+         paste(failed, collapse = ", "), ". Every other year is saved; run again to finish just those.",
+         call. = FALSE)
+  }
+
+  out <- dplyr::bind_rows(lapply(year_file(years), readRDS)) |>
+    dplyr::distinct(tmdb_id, .keep_all = TRUE)
   saveRDS(out, file.path(dir, paste0("discover_", today, ".rds")))
+  unlink(partial, recursive = TRUE)
   out
 }
 
