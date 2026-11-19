@@ -95,9 +95,11 @@ It takes a few minutes. It reads phase 1's tables, so run phase 1 first.
 | Keyword sorting | `R/keyword_groups.R` sorts keywords: **mood** words ("admiring", "suspenseful"; TMDB's mood tags are IDs 325761–325857) and **production** words ("sequel", "black and white", "based on novel or book") are left out of the map; **generic** ones (relationships, places, the decade a film is set in) count at half weight |
 | Compress | Keywords are compressed on their own (truncated SVD, 100 dimensions), then genre, language, year and runtime are added back at light weights so they nudge rather than dominate |
 | Layout | UMAP twice: 10 dimensions to find neighborhoods in, 2 for the map. Learned only from films with 3+ content keywords; the rest are placed onto it afterwards |
-| Neighborhoods | HDBSCAN finds dense groups (15+ films). Films it leaves unclaimed, and films with too few keywords, move to the nearest neighborhood; `placement` says which (`core`, `nearest`, `loose fit`) |
-| Districts | Neighborhoods whose centers sit close together are grouped into 20 districts |
-| Names | Draft names from each neighborhood's most distinctive keywords (common inside it, rarer outside) |
+| Neighborhoods | HDBSCAN finds dense groups (15+ films). A neighborhood with 200+ core films gets a close-up second clustering and splits if that finds distinct groups |
+| Hard genre lines | Horror, animation and documentary never share a neighborhood with films across the line: mixed neighborhoods are split, stray core films move to their most similar films on their side |
+| Placement | Films the clustering left unclaimed, and films with under 3 content keywords, join the neighborhood where most of their 15 most similar core films live, on their side of every hard line; `placement` says which (`core`, `nearest`, `loose fit`, `moved across genre line`) |
+| Districts | Hand-picked: `names/districts.csv` lists them (17) and `names/district_defaults.csv` places named neighborhoods; documentaries go to The Archive by genre; the rest join their nearest neighborhood's district. Without `names/districts.csv`, districts are drawn from the data (Ward clustering into 20) |
+| Names | Draft names from each neighborhood's most distinctive keywords. Your own names, subtitles and districts are saved in `names/` with `save_names.R` and follow their films through reruns (`R/names.R`) |
 
 ### What comes out
 
@@ -109,7 +111,7 @@ In `data/city/`:
 | `neighborhoods` | Each neighborhood: draft name, size, district, years, top genres, top keywords, example films, map center |
 | `districts` | The same for districts |
 | `cluster_space` | Each film's 10-dimensional position, used later to place new films |
-| `neighborhood_names.csv` | A sheet for naming by hand: fill in `your_name` |
+| `neighborhood_names.csv` | The sheet for naming by hand: `your_name`, `your_subtitle`, `your_district` (saved names already filled in). Edit, then `source("save_names.R")` |
 
 And in `data/checks/`: `city_report.md` (summary, districts, biggest neighborhoods, and 20 random neighborhoods to check by eye) and `city_map.png`.
 
