@@ -16,6 +16,9 @@ city <- build_city(spine, cfg)
 message("3/4 describing neighborhoods and districts")
 tabs <- city_tables(city, spine, cfg)
 tabs <- apply_names(city, tabs, cfg)
+placed <- assign_districts(city, tabs, spine, cfg)   # hand-picked districts, if names/districts.csv exists
+city <- placed$city
+tabs <- placed$tabs
 
 message("4/4 writing tables, map and report")
 write_city(city, tabs, cfg)
@@ -23,4 +26,4 @@ map <- city_map(city, tabs, cfg)
 report <- city_report(city, tabs, cfg)
 message("done: ", nrow(tabs$neighborhoods), " neighborhoods in ", nrow(tabs$districts),
         " districts. report at ", report, if (!is.na(map)) paste0(", map at ", map),
-        ". names to edit: ", cfg$city_dir, "/neighborhood_names.csv and district_names.csv")
+        ". names and districts to edit: ", cfg$city_dir, "/neighborhood_names.csv")

@@ -77,13 +77,16 @@ city_tables <- function(city, spine, cfg) {
                        dplyr::summarise(x = mean(x), y = mean(y), share_placed = round(mean(from_noise), 2)),
                      by = "neighborhood_id") |>
     dplyr::relocate(neighborhood_id, district_id, draft_name, size)
-  districts <- describe_groups(dplyr::select(fn, tmdb_id, district_id, placement, fit), "district_id",
-                               spine, vocab, n_name_words = 2, n_examples = 6) |>
+  list(neighborhoods = hoods, districts = district_table(fn, hoods, spine, vocab))
+}
+
+district_table <- function(fn, hoods, spine, vocab) {
+  describe_groups(dplyr::select(fn, tmdb_id, district_id, placement, fit), "district_id",
+                  spine, vocab, n_name_words = 2, n_examples = 6) |>
     dplyr::left_join(dplyr::count(hoods, district_id, name = "n_neighborhoods"), by = "district_id") |>
     dplyr::left_join(fn |> dplyr::group_by(district_id) |> dplyr::summarise(x = mean(x), y = mean(y)),
                      by = "district_id") |>
     dplyr::relocate(district_id, draft_name, n_neighborhoods, size)
-  list(neighborhoods = hoods, districts = districts)
 }
 
 write_city <- function(city, tabs, cfg) {
@@ -101,15 +104,22 @@ write_city <- function(city, tabs, cfg) {
     dplyr::transmute(neighborhood_id, district_id, size, draft_name, years, top_genres,
                      top_keywords, examples, name_id = col(tabs$neighborhoods, "name_id"),
                      your_name = col(tabs$neighborhoods, "your_name"),
-                     your_subtitle = col(tabs$neighborhoods, "your_subtitle"))
+                     your_subtitle = col(tabs$neighborhoods, "your_subtitle"),
+                     your_district = col(tabs$neighborhoods, "your_district"),
+                     district_source = col(tabs$neighborhoods, "district_source"))
+  sheet <- file.path(cfg$city_dir, "neighborhood_names.csv")
+  district_sheet <- file.path(cfg$city_dir, "district_names.csv")
+  utils::write.csv(naming, sheet, row.names = FALSE, na = "", fileEncoding = "UTF-8")
+  # Hand-picked districts are named in names/districts.csv, so no district sheet.
+  if (!is.null(tabs$district_list)) {
+    if (file.exists(district_sheet)) file.remove(district_sheet)
+    return(c(paths, sheet))
+  }
   district_naming <- tabs$districts |>
     dplyr::transmute(district_id, size, n_neighborhoods, draft_name, years, top_genres, examples,
                      name_id = col(tabs$districts, "name_id"),
                      your_name = col(tabs$districts, "your_name"),
                      your_subtitle = col(tabs$districts, "your_subtitle"))
-  sheet <- file.path(cfg$city_dir, "neighborhood_names.csv")
-  district_sheet <- file.path(cfg$city_dir, "district_names.csv")
-  utils::write.csv(naming, sheet, row.names = FALSE, na = "", fileEncoding = "UTF-8")
   utils::write.csv(district_naming, district_sheet, row.names = FALSE, na = "", fileEncoding = "UTF-8")
   c(paths, sheet, district_sheet)
 }
@@ -153,8 +163,9 @@ city_report <- function(city, tabs, cfg) {
   block <- function(r) c(
     sprintf("### %d. %s", r$neighborhood_id, r$shown),
     "",
-    sprintf("%s films, %s, district %d, %s. Core %.0f%%, avg fit %.2f", format(r$size, big.mark = ","),
-            r$years, r$district_id, dplyr::coalesce(r$top_genres, ""), 100 * r$core_share, r$mean_fit),
+    sprintf("%s films, %s, district %d%s, %s. Core %.0f%%, avg fit %.2f", format(r$size, big.mark = ","),
+            r$years, r$district_id,
+            if ("your_district" %in% names(r) && nzchar(r$your_district)) paste0(" (", r$your_district, ")") else "", dplyr::coalesce(r$top_genres, ""), 100 * r$core_share, r$mean_fit),
     "",
     sprintf("Keywords: %s", dplyr::coalesce(r$top_keywords, "(none distinctive)")),
     "",
@@ -197,6 +208,10 @@ city_report <- function(city, tabs, cfg) {
     sprintf("| Names carried over from names/: neighborhoods, districts | %d of %d, %d of %d |",
             named(h), nrow(h), named(d), nrow(d)),
     sprintf("| Saved names that found no neighborhood or district this run | %d |", nrow(um)),
+    if ("district_source" %in% names(h)) sprintf(
+      "| Districts: hand-picked list of %d. Neighborhoods placed by you, by name default, by genre, by nearest neighbor | %d, %d, %d, %d |",
+      nrow(tabs$district_list), sum(h$district_source == "you"), sum(h$district_source == "default"),
+      sum(h$district_source == "genre"), sum(h$district_source == "nearest")),
     "",
     if (nrow(um)) c(
       "## Names without a home this run",

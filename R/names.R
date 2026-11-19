@@ -5,9 +5,10 @@
 # whichever new group now holds most of its anchors.
 #
 # The loop:
-#   1. run_phase2.R writes data/city/neighborhood_names.csv and
-#      district_names.csv, with names already filled in where they carried over.
-#   2. Type or change names (your_name, your_subtitle) in those sheets.
+#   1. run_phase2.R writes data/city/neighborhood_names.csv (and
+#      district_names.csv when districts are drawn by the data), with names
+#      and districts already filled in where they carried over.
+#   2. Type or change your_name, your_subtitle and your_district in the sheet.
 #   3. source("save_names.R") stores them in names/.
 
 names_files <- function(cfg) {
@@ -28,7 +29,7 @@ clean_name <- function(x) {
 
 empty_store <- function() {
   list(names = dplyr::tibble(level = character(), name_id = integer(), name = character(),
-                             subtitle = character()),
+                             subtitle = character(), district = character()),
        anchors = dplyr::tibble(name_id = integer(), tmdb_id = integer()))
 }
 
@@ -37,8 +38,10 @@ load_names <- function(cfg) {
   if (!file.exists(f$names)) return(empty_store())
   nm <- read_sheet(f$names)
   an <- if (file.exists(f$anchors)) read_sheet(f$anchors) else empty_store()$anchors
+  if (!"district" %in% names(nm)) nm$district <- ""
   list(names = dplyr::transmute(nm, level = as.character(level), name_id = as.integer(name_id),
-                                name = clean_name(name), subtitle = clean_name(subtitle)),
+                                name = clean_name(name), subtitle = clean_name(subtitle),
+                                district = clean_name(district)),
        anchors = dplyr::transmute(an, name_id = as.integer(name_id), tmdb_id = as.integer(tmdb_id)))
 }
 
@@ -58,9 +61,11 @@ write_names <- function(store, cfg) {
 # (best matches go first, ranked by films in common / films in either), so a
 # small district folded into a big one doesn't take the big one's name.
 match_names <- function(groups, store, level, min_overlap = 0.5) {
-  nm <- store$names[store$names$level == level & nzchar(store$names$name), ]
+  nm <- store$names[store$names$level == level &
+                      (nzchar(store$names$name) | nzchar(store$names$district)), ]
   none <- list(matched = dplyr::tibble(group = integer(), name_id = integer(), name = character(),
-                                       subtitle = character(), overlap = numeric()),
+                                       subtitle = character(), district = character(),
+                                       overlap = numeric()),
                unmatched = dplyr::tibble(name_id = integer(), name = character(),
                                          best_group = integer(), overlap = numeric()))
   if (!nrow(nm)) return(none)
@@ -83,11 +88,11 @@ match_names <- function(groups, store, level, min_overlap = 0.5) {
   }
   matched <- hits[keep, ] |>
     dplyr::left_join(nm, by = "name_id") |>
-    dplyr::transmute(group, name_id, name, subtitle, overlap = round(overlap, 2))
+    dplyr::transmute(group, name_id, name, subtitle, district, overlap = round(overlap, 2))
   best <- hits |> dplyr::group_by(name_id) |> dplyr::slice_max(overlap, n = 1, with_ties = FALSE) |>
     dplyr::ungroup()
   unmatched <- nm |>
-    dplyr::filter(!name_id %in% matched$name_id) |>
+    dplyr::filter(!name_id %in% matched$name_id, nzchar(name)) |>
     dplyr::left_join(dplyr::select(best, name_id, best_group = group, overlap), by = "name_id") |>
     dplyr::transmute(name_id, name, best_group, overlap = round(overlap, 2))
   list(matched = matched, unmatched = unmatched)
@@ -103,9 +108,11 @@ apply_names <- function(city, tabs, cfg) {
                      cfg$names_min_overlap)
     out <- tab |>
       dplyr::left_join(dplyr::rename(m$matched, !!id_col := group, your_name = name,
-                                     your_subtitle = subtitle, name_overlap = overlap), by = id_col) |>
+                                     your_subtitle = subtitle, your_district = district,
+                                     name_overlap = overlap), by = id_col) |>
       dplyr::mutate(your_name = dplyr::coalesce(your_name, ""),
-                    your_subtitle = dplyr::coalesce(your_subtitle, ""))
+                    your_subtitle = dplyr::coalesce(your_subtitle, ""),
+                    your_district = dplyr::coalesce(your_district, ""))
     list(tab = out, unmatched = dplyr::mutate(m$unmatched, level = level, .before = 1))
   }
   h <- add(tabs$neighborhoods, "neighborhood_id", "neighborhood")
@@ -145,8 +152,12 @@ save_names <- function(cfg,
                   name_id = if ("name_id" %in% names(s)) as.integer(s$name_id) else NA_integer_,
                   name = clean_name(s$your_name),
                   subtitle = if ("your_subtitle" %in% names(s)) clean_name(s$your_subtitle) else "",
+                  district = if ("your_district" %in% names(s)) clean_name(s$your_district) else "",
                   level = level, id_col = id_col, core_only = core_only)
   }
+  # With a hand-picked district list (names/districts.csv), districts are
+  # named there, not in the district sheet.
+  if (!is.null(load_district_list(cfg))) district_sheet <- NULL
   rows <- dplyr::bind_rows(one_level(neighborhood_sheet, "neighborhood_id", "neighborhood", TRUE),
                            one_level(district_sheet, "district_id", "district", FALSE))
   if (!nrow(rows)) stop("No naming sheets found in ", cfg$city_dir, call. = FALSE)
@@ -155,7 +166,7 @@ save_names <- function(cfg,
   touched <- rows$name_id[!is.na(rows$name_id)]
   names_kept <- store$names[!store$names$name_id %in% touched, ]
   anchors_kept <- store$anchors[!store$anchors$name_id %in% touched, ]
-  named <- rows[nzchar(rows$name), ]
+  named <- rows[nzchar(rows$name) | nzchar(rows$district), ]
   next_id <- max(c(0L, store$names$name_id)) + 1L
   new <- is.na(named$name_id)
   named$name_id[new] <- seq(next_id, length.out = sum(new))
@@ -166,10 +177,13 @@ save_names <- function(cfg,
     if (length(ids) < 5) ids <- members$tmdb_id
     dplyr::tibble(name_id = r$name_id, tmdb_id = as.integer(ids))
   }))
-  store <- list(names = dplyr::bind_rows(names_kept, dplyr::select(named, level, name_id, name, subtitle)),
+  store <- list(names = dplyr::bind_rows(names_kept,
+                                         dplyr::select(named, level, name_id, name, subtitle, district)),
                 anchors = dplyr::bind_rows(anchors_kept, anchors))
   paths <- write_names(store, cfg)
-  message(sprintf("saved %d neighborhood and %d district names to %s",
-                  sum(named$level == "neighborhood"), sum(named$level == "district"), cfg$names_dir))
+  message(sprintf("saved %d neighborhood names, %d neighborhood districts and %d district names to %s",
+                  sum(named$level == "neighborhood" & nzchar(named$name)),
+                  sum(named$level == "neighborhood" & nzchar(named$district)),
+                  sum(named$level == "district"), cfg$names_dir))
   invisible(paths)
 }

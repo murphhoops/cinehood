@@ -117,3 +117,20 @@ test_that("when a small named group folds into a big one, the big one's name win
   expect_equal(out$districts$your_name[out$districts$district_id == 3], "The Underworld")
   expect_equal(out$names_unmatched$name, "The Shadows")
 })
+
+test_that("a district chosen for an unnamed neighborhood is saved and carried over", {
+  cfg <- names_cfg(withr::local_tempdir())
+  run1 <- fake_run(rep(1:2, each = 20), rep(1, 40))
+  write_sheets(run1, cfg, c("1" = "Shark Harbor", "2" = ""))
+  sheet <- read_sheet(file.path(cfg$city_dir, "neighborhood_names.csv"))
+  sheet$your_district <- c("Monster Docks", "The Archive")
+  utils::write.csv(sheet, file.path(cfg$city_dir, "neighborhood_names.csv"), row.names = FALSE, na = "")
+  save_names(cfg)
+  run2 <- fake_run(rep(c(5, 3), each = 20), rep(1, 40))
+  tabs <- list(neighborhoods = dplyr::tibble(neighborhood_id = c(3, 5), draft_name = "x"),
+               districts = dplyr::tibble(district_id = 1, draft_name = "y"))
+  h <- apply_names(list(film_neighborhoods = run2), tabs, cfg)$neighborhoods
+  expect_equal(h$your_district[h$neighborhood_id == 5], "Monster Docks")
+  expect_equal(h$your_district[h$neighborhood_id == 3], "The Archive")
+  expect_equal(h$your_name[h$neighborhood_id == 3], "")
+})

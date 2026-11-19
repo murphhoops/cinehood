@@ -320,3 +320,48 @@ test_that("a big neighborhood with two clear groups inside is re-split", {
   small <- split_big_neighborhoods(rep(1L, 300), Z, modifyList(cfg, list(city_max_core = 400)))
   expect_equal(small$resplits, 0L)
 })
+
+test_that("hand-picked districts: yours, then by name, then by genre, then nearest", {
+  f <- city_fixture()
+  cfg <- f$cfg
+  cfg$names_dir <- withr::local_tempdir()
+  utils::write.csv(data.frame(name = c("The Underworld", "The Haunts", "Old Town"),
+                              subtitle = c("Crime", "Spooky", "Classics"),
+                              claims_genre = c("", "Horror", "")),
+                   file.path(cfg$names_dir, "districts.csv"), row.names = FALSE)
+  utils::write.csv(data.frame(neighborhood = "Heist Row", district = "The Underworld"),
+                   file.path(cfg$names_dir, "district_defaults.csv"), row.names = FALSE)
+  joined <- dplyr::inner_join(f$city$film_neighborhoods, f$spine$films, by = "tmdb_id")
+  major <- joined |> dplyr::count(neighborhood_id, true_group) |>
+    dplyr::group_by(neighborhood_id) |> dplyr::slice_max(n, n = 1, with_ties = FALSE)
+  hood_of <- function(g) major$neighborhood_id[major$true_group == g][1]
+  tabs <- f$tabs
+  tabs$neighborhoods$your_name <- ifelse(tabs$neighborhoods$neighborhood_id == hood_of("heist"), "Heist Row", "")
+  tabs$neighborhoods$your_district <- ifelse(tabs$neighborhoods$neighborhood_id == hood_of("samurai"),
+                                             "Old Town", "")
+  out <- assign_districts(f$city, tabs, f$spine, cfg)
+  h <- out$tabs$neighborhoods
+  at <- function(g) h[h$neighborhood_id == hood_of(g), ]
+  expect_equal(at("samurai")$your_district, "Old Town");       expect_equal(at("samurai")$district_source, "you")
+  expect_equal(at("heist")$your_district, "The Underworld");   expect_equal(at("heist")$district_source, "default")
+  expect_equal(at("ghosts")$your_district, "The Haunts");      expect_equal(at("ghosts")$district_source, "genre")
+  expect_equal(at("boxing")$district_source, "nearest")
+  expect_true(all(h$your_district %in% c("The Underworld", "The Haunts", "Old Town")))
+  # films follow their neighborhood's district, and districts are numbered in list order
+  fn <- out$city$film_neighborhoods
+  expect_equal(fn$district_id, h$district_id[match(fn$neighborhood_id, h$neighborhood_id)])
+  expect_equal(at("samurai")$district_id, 3)
+  expect_true(all(out$tabs$districts$your_name %in% c("The Underworld", "The Haunts", "Old Town")))
+  # the sheet carries the district and no district sheet is written
+  write_city(out$city, out$tabs, modifyList(cfg, list(city_dir = withr::local_tempdir())))
+  rep <- readLines(city_report(out$city, out$tabs, cfg))
+  expect_true(any(grepl("hand-picked list of 3", rep, fixed = TRUE)))
+})
+
+test_that("without a district list, districts come from the data", {
+  f <- city_fixture()
+  cfg <- f$cfg
+  cfg$names_dir <- withr::local_tempdir()
+  out <- assign_districts(f$city, f$tabs, f$spine, cfg)
+  expect_identical(out$city, f$city)
+})
