@@ -102,3 +102,18 @@ test_that("mood tags missed by the ID block count as tone", {
   expect_equal(classify_keyword(c("didactic", "taunting", "affectation", "shark"), c(1L, 2L, 3L, 4L)),
                c("tone", "tone", "tone", "content"))
 })
+
+test_that("when a small named group folds into a big one, the big one's name wins", {
+  cfg <- names_cfg(withr::local_tempdir())
+  # district 1 = 100 films, district 2 = 20 films
+  run1 <- fake_run(rep(1, 120), c(rep(1, 100), rep(2, 20)))
+  write_sheets(run1, cfg, c("1" = "x"), c("1" = "The Underworld", "2" = "The Shadows"))
+  save_names(cfg)
+  # rerun: all of district 2 and 90 of district 1 now share district 3
+  run2 <- fake_run(rep(1, 120), c(rep(3, 90), rep(4, 10), rep(3, 20)))
+  tabs <- list(neighborhoods = dplyr::tibble(neighborhood_id = 1, draft_name = "x"),
+               districts = dplyr::tibble(district_id = c(3, 4), draft_name = "y"))
+  out <- apply_names(list(film_neighborhoods = run2), tabs, cfg)
+  expect_equal(out$districts$your_name[out$districts$district_id == 3], "The Underworld")
+  expect_equal(out$names_unmatched$name, "The Shadows")
+})

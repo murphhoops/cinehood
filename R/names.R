@@ -52,9 +52,11 @@ write_names <- function(store, cfg) {
 }
 
 # Give each saved name of one level to the current group holding the largest
-# share of its anchors, one name per group, best matches first. A name whose
-# best share is under `min_overlap` (its group was broken up) or whose group
-# went to a better-matching name (two groups merged) is left unmatched.
+# share of its anchors, one name per group. A name whose best share is under
+# `min_overlap` (its group was broken up) is left unmatched. When two named
+# groups merge, the name whose films make up more of the new group keeps it
+# (best matches go first, ranked by films in common / films in either), so a
+# small district folded into a big one doesn't take the big one's name.
 match_names <- function(groups, store, level, min_overlap = 0.5) {
   nm <- store$names[store$names$level == level & nzchar(store$names$name), ]
   none <- list(matched = dplyr::tibble(group = integer(), name_id = integer(), name = character(),
@@ -67,12 +69,14 @@ match_names <- function(groups, store, level, min_overlap = 0.5) {
     dplyr::inner_join(groups, by = "tmdb_id") |>
     dplyr::count(name_id, group) |>
     dplyr::group_by(name_id) |>
-    dplyr::mutate(overlap = n / sum(n)) |>
+    dplyr::mutate(overlap = n / sum(n), n_anchors = sum(n)) |>
     dplyr::ungroup() |>
-    dplyr::arrange(dplyr::desc(overlap), dplyr::desc(n))
+    dplyr::left_join(dplyr::count(groups, group, name = "group_size"), by = "group") |>
+    dplyr::mutate(similarity = n / (n_anchors + group_size - n)) |>
+    dplyr::arrange(dplyr::desc(similarity), dplyr::desc(overlap))
   taken_name <- integer(); taken_group <- integer(); keep <- logical(nrow(hits))
   for (i in seq_len(nrow(hits))) {
-    if (hits$overlap[i] < min_overlap) break
+    if (hits$overlap[i] < min_overlap) next
     if (hits$name_id[i] %in% taken_name || hits$group[i] %in% taken_group) next
     keep[i] <- TRUE
     taken_name <- c(taken_name, hits$name_id[i]); taken_group <- c(taken_group, hits$group[i])
@@ -80,7 +84,8 @@ match_names <- function(groups, store, level, min_overlap = 0.5) {
   matched <- hits[keep, ] |>
     dplyr::left_join(nm, by = "name_id") |>
     dplyr::transmute(group, name_id, name, subtitle, overlap = round(overlap, 2))
-  best <- hits |> dplyr::group_by(name_id) |> dplyr::slice(1) |> dplyr::ungroup()
+  best <- hits |> dplyr::group_by(name_id) |> dplyr::slice_max(overlap, n = 1, with_ties = FALSE) |>
+    dplyr::ungroup()
   unmatched <- nm |>
     dplyr::filter(!name_id %in% matched$name_id) |>
     dplyr::left_join(dplyr::select(best, name_id, best_group = group, overlap), by = "name_id") |>
