@@ -34,6 +34,7 @@ fake_city_spine <- function(per_group = 80, seed = 7) {
 city_test_cfg <- function(dir) {
   cfg <- test_cfg(dir)
   cfg$city_dir <- file.path(dir, "city")
+  cfg$names_dir <- file.path(dir, "names")
   cfg$city_neighbors <- 15
   cfg$city_districts <- 3
   cfg$city_review_n <- 5
@@ -122,6 +123,24 @@ test_that("tables, naming sheet, map and report are written", {
   rep <- readLines(city_report(f$city, f$tabs, f$cfg))
   expect_true(any(grepl("^\\| Neighborhoods \\|", rep)))
   expect_true(any(grepl("random neighborhoods, for a check by eye", rep)))
+})
+
+test_that("names typed into the sheets show up in the next report", {
+  f <- city_fixture()
+  write_city(f$city, f$tabs, f$cfg)
+  sheet_path <- file.path(f$cfg$city_dir, "neighborhood_names.csv")
+  sheet <- read_sheet(sheet_path)
+  sheet$your_name <- ""
+  sheet$your_name[1] <- "Test Town"
+  utils::write.csv(sheet, sheet_path, row.names = FALSE, na = "")
+  save_names(f$cfg)
+  tabs <- apply_names(f$city, f$tabs, f$cfg)
+  expect_equal(tabs$neighborhoods$your_name[1], "Test Town")
+  write_city(f$city, tabs, f$cfg)
+  expect_equal(read_sheet(sheet_path)$your_name[1], "Test Town")
+  rep <- readLines(city_report(f$city, tabs, f$cfg))
+  expect_true(any(grepl("Test Town (", rep, fixed = TRUE)))
+  expect_true(any(grepl("1 of", rep, fixed = TRUE)))
 })
 
 test_that("the same settings give the same city", {

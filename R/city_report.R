@@ -94,20 +94,38 @@ write_city <- function(city, tabs, cfg) {
     write_table(tabs$neighborhoods, "neighborhoods", cfg$city_dir),
     write_table(tabs$districts, "districts", cfg$city_dir)
   )
-  # A sheet for naming by hand: fill in your_name, leave the rest.
+  # Sheets for naming by hand: fill in your_name and your_subtitle, leave the
+  # rest, then source("save_names.R"). Names saved before are already filled in.
+  col <- function(tab, x) if (x %in% names(tab)) tab[[x]] else if (x == "name_id") NA_integer_ else ""
   naming <- tabs$neighborhoods |>
     dplyr::transmute(neighborhood_id, district_id, size, draft_name, years, top_genres,
-                     top_keywords, examples, your_name = "")
+                     top_keywords, examples, name_id = col(tabs$neighborhoods, "name_id"),
+                     your_name = col(tabs$neighborhoods, "your_name"),
+                     your_subtitle = col(tabs$neighborhoods, "your_subtitle"))
+  district_naming <- tabs$districts |>
+    dplyr::transmute(district_id, size, n_neighborhoods, draft_name, years, top_genres, examples,
+                     name_id = col(tabs$districts, "name_id"),
+                     your_name = col(tabs$districts, "your_name"),
+                     your_subtitle = col(tabs$districts, "your_subtitle"))
   sheet <- file.path(cfg$city_dir, "neighborhood_names.csv")
+  district_sheet <- file.path(cfg$city_dir, "district_names.csv")
   utils::write.csv(naming, sheet, row.names = FALSE, na = "", fileEncoding = "UTF-8")
-  c(paths, sheet)
+  utils::write.csv(district_naming, district_sheet, row.names = FALSE, na = "", fileEncoding = "UTF-8")
+  c(paths, sheet, district_sheet)
+}
+
+# A group's name for display: your name with the draft in brackets, or just
+# the draft when it has no name yet.
+shown_name <- function(tab) {
+  nm <- if ("your_name" %in% names(tab)) dplyr::coalesce(tab$your_name, "") else rep("", nrow(tab))
+  ifelse(nzchar(nm), paste0(nm, " (", tab$draft_name, ")"), tab$draft_name)
 }
 
 city_map <- function(city, tabs, cfg) {
   if (!requireNamespace("ggplot2", quietly = TRUE)) return(NA_character_)
   dir.create(cfg$check_dir, recursive = TRUE, showWarnings = FALSE)
   pts <- dplyr::mutate(city$film_neighborhoods, district = factor(district_id))
-  labs <- dplyr::mutate(tabs$districts, label = paste0(district_id, ". ", draft_name))
+  labs <- dplyr::mutate(tabs$districts, label = paste0(district_id, ". ", shown_name(tabs$districts)))
   p <- ggplot2::ggplot(pts, ggplot2::aes(x, y, colour = district)) +
     ggplot2::geom_point(size = 0.35, alpha = 0.55) +
     ggplot2::geom_label(data = labs, ggplot2::aes(x, y, label = label), inherit.aes = FALSE,
@@ -125,11 +143,15 @@ city_map <- function(city, tabs, cfg) {
 city_report <- function(city, tabs, cfg) {
   h <- tabs$neighborhoods
   d <- tabs$districts
+  h$shown <- shown_name(h)
+  d$shown <- shown_name(d)
   fn <- city$film_neighborhoods
+  um <- tabs$names_unmatched %||% dplyr::tibble()
+  named <- function(tab) if ("your_name" %in% names(tab)) sum(nzchar(tab$your_name)) else 0L
   set.seed(cfg$city_seed)
   review <- h[sort(sample(nrow(h), min(cfg$city_review_n, nrow(h)))), ]
   block <- function(r) c(
-    sprintf("### %d. %s", r$neighborhood_id, r$draft_name),
+    sprintf("### %d. %s", r$neighborhood_id, r$shown),
     "",
     sprintf("%s films, %s, district %d, %s. Core %.0f%%, avg fit %.2f", format(r$size, big.mark = ","),
             r$years, r$district_id, dplyr::coalesce(r$top_genres, ""), 100 * r$core_share, r$mean_fit),
@@ -172,21 +194,35 @@ city_report <- function(city, tabs, cfg) {
     sprintf("| Keywords used as features (of which counted at %s weight) | %s (%s) |",
             cfg$city_light_weight, format(city$feature_info$n_keywords, big.mark = ","),
             format(city$feature_info$n_light_keywords, big.mark = ",")),
+    sprintf("| Names carried over from names/: neighborhoods, districts | %d of %d, %d of %d |",
+            named(h), nrow(h), named(d), nrow(d)),
+    sprintf("| Saved names that found no neighborhood or district this run | %d |", nrow(um)),
     "",
+    if (nrow(um)) c(
+      "## Names without a home this run",
+      "",
+      "Their films split up or merged with another named group. Most of each name's films are now in the group shown; rename that group or drop the name.",
+      "",
+      "| Level | Name | Most of its films are now in | Share |",
+      "| --- | --- | --- | --- |",
+      sprintf("| %s | %s | %s | %.0f%% |", um$level, um$name,
+              ifelse(is.na(um$best_group), "(gone)", paste0("#", um$best_group)),
+              100 * dplyr::coalesce(um$overlap, 0)),
+      ""),
     "## Districts",
     "",
-    "| # | Draft name | Neighborhoods | Films | Years | Top genres |",
+    "| # | Name | Neighborhoods | Films | Years | Top genres |",
     "| --- | --- | --- | --- | --- | --- |",
-    sprintf("| %d | %s | %d | %s | %s | %s |", d$district_id, d$draft_name, d$n_neighborhoods,
+    sprintf("| %d | %s | %d | %s | %s | %s |", d$district_id, d$shown, d$n_neighborhoods,
             format(d$size, big.mark = ","), d$years, d$top_genres),
     "",
     "## The 10 biggest neighborhoods",
     "",
-    "| # | Draft name | Films | Years | Examples |",
+    "| # | Name | Films | Years | Examples |",
     "| --- | --- | --- | --- | --- |",
     {
       b <- utils::head(h[order(-h$size), ], 10)
-      sprintf("| %d | %s | %d | %s | %s |", b$neighborhood_id, b$draft_name, b$size, b$years,
+      sprintf("| %d | %s | %d | %s | %s |", b$neighborhood_id, b$shown, b$size, b$years,
               vapply(strsplit(b$examples, "; "), function(e) paste(utils::head(e, 3), collapse = "; "), character(1)))
     },
     "",
@@ -194,11 +230,11 @@ city_report <- function(city, tabs, cfg) {
     "",
     "The 10 neighborhoods whose films sit least firmly in them (lowest average fit). If any feel like a grab bag, these are the likeliest.",
     "",
-    "| # | Draft name | Films | Avg fit | Core share | Examples |",
+    "| # | Name | Films | Avg fit | Core share | Examples |",
     "| --- | --- | --- | --- | --- | --- |",
     {
       w <- utils::head(h[order(h$mean_fit), ], 10)
-      sprintf("| %d | %s | %d | %.2f | %.0f%% | %s |", w$neighborhood_id, w$draft_name, w$size, w$mean_fit,
+      sprintf("| %d | %s | %d | %.2f | %.0f%% | %s |", w$neighborhood_id, w$shown, w$size, w$mean_fit,
               100 * w$core_share,
               vapply(strsplit(w$examples, "; "), function(e) paste(utils::head(e, 4), collapse = "; "), character(1)))
     },

@@ -29,7 +29,29 @@ TONE_EXTRA <- c(
   "vindictive", "pathetic", "egotistical", "reminiscent", "suspicious", "wonder",
   "calm", "wistful", "questioning", "zealous", "sadistic", "psychotic", "evil",
   "suspense", "mystery", "horror", "comedy", "crime", "adventure", "fantasy",
-  "romance", "psychological", "surreal"
+  "romance", "psychological", "surreal",
+  # TMDB mood tags that sit outside the ID block above (found in the v6 report:
+  # "affectation, didactic, taunting" glued a grab bag together), plus the rest
+  # of the same mood vocabulary. A wide net: a mood word left in the map does
+  # more harm than a rare content word left out.
+  "affectation", "didactic", "taunting", "amused", "appreciative", "approving",
+  "arrogant", "audacious", "awestruck", "bewildered", "callous", "celebratory",
+  "cheerful", "comforting", "compassionate", "complicated", "condescending",
+  "defiant", "dignified", "disdainful", "earnest", "embarrassed", "empathetic",
+  "encouraging", "enthusiastic", "exhilarated", "familiar", "frightened",
+  "hopeful", "horrified", "humorous", "ambiguous", "admiring", "bold", "tragic",
+  "vibrant", "pessimistic", "optimistic", "powerful", "pretentious", "harsh",
+  "bittersweet", "cautious", "exuberant", "foreboding", "gloomy", "heartfelt",
+  "humble", "informative", "inquisitive", "insightful", "knowing", "nonchalant",
+  "proud", "regretful", "respectful", "sarcastic", "scornful", "skeptical",
+  "sincere", "sympathetic", "tender", "urgent", "vexed", "excited", "amazed",
+  "euphoric", "baffled", "assertive", "enchanted", "exasperated", "powerless",
+  "frustrated", "gentle", "harrowing", "eerie", "uplifting", "heartwarming",
+  "heartbreaking", "thrilling", "chilling", "gritty", "quirky", "zany", "goofy",
+  "silly", "violent", "cruel", "dark", "bleak", "uneasy", "unsettling",
+  # emotion and trait nouns used the same way
+  "anger", "fear", "confusion", "surprise", "strength", "determination", "lonely",
+  "awe", "joy", "sadness", "hope", "courage", "pride", "shame", "regret", "anxiety"
 )
 
 PRODUCTION <- c(

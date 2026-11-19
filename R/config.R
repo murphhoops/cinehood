@@ -93,6 +93,12 @@ cinehood_config <- function() {
     city_seed      = 2026,
     city_review_n  = 20,   # random neighborhoods printed in the report for a check by eye
 
+    # Names you give neighborhoods and districts (see R/names.R). Kept in the
+    # repo, not data/, so reruns can't wipe them. After a rerun a name goes to
+    # the group holding at least this share of the films it was given to.
+    names_dir = "names",
+    names_min_overlap = 0.5,
+
     # Where everything goes. data/ is gitignored.
     raw_dir   = "data/raw",
     out_dir   = "data/spine",
